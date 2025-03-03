@@ -1,88 +1,132 @@
+import pandas as pd
 import numpy as np
 from sklearn.model_selection import train_test_split
-from sklearn.impute import SimpleImputer
+from sklearn.preprocessing import StandardScaler
 import mlflow
+import os
+import matplotlib.pyplot as plt
+import seaborn as sns
 
 
 def data_transformation(df, test_size=0.2, random_state=42):
 
     print("Starting data transformation...")
 
-    # Make a copy to avoid modifying the original
+    # Create a copy to avoid modifying the original
+    df_clean = df.copy()
 
-    df_transformed = df.copy()
+    # Remove outliers from price
+    # Extremely high or low prices can distort the model
+    q1 = df_clean['price'].quantile(0.01)  # 1st percentile
+    q3 = df_clean['price'].quantile(0.99)  # 99th percentile
 
-    # ---- 1. DATA TYPE CONVERSION ----
-    # Convert specific columns to appropriate types
-    # Example: Convert 'category' column to categorical type
-    if 'category' in df_transformed.columns:
-        df_transformed['category'] = df_transformed['category'].astype('category')
+    df_clean = df_clean[(df_clean['price'] >= q1) & (df_clean['price'] <= q3)]
 
-    # ---- 2. MISSING VALUE HANDLING ----
-    # Log missing value counts before handling
-    missing_before = df_transformed.isnull().sum().sum()
-    mlflow.log_metric("missing_values_before", missing_before)
+    # Remove outliers from physical dimensions
+    for col in ['product_weight_g', 'volume_cm3']:
+        q1 = df_clean[col].quantile(0.01)
+        q3 = df_clean[col].quantile(0.99)
+        df_clean = df_clean[(df_clean[col] >= q1) & (df_clean[col] <= q3)]
 
-    # For numeric columns, impute with median
-    numeric_cols = df_transformed.select_dtypes(include=['number']).columns
-    if len(numeric_cols) > 0:
-        numeric_imputer = SimpleImputer(strategy='median')
-        df_transformed[numeric_cols] = numeric_imputer.fit_transform(df_transformed[numeric_cols])
+    # Log outlier removal stats
+    mlflow.log_metric("rows_after_outlier_removal", len(df_clean))
+    mlflow.log_metric("outliers_removed_percent", 100 * (1 - len(df_clean) / len(df)))
 
-    # For categorical columns, impute with most frequent
-    cat_cols = df_transformed.select_dtypes(include=['object', 'category']).columns
-    if len(cat_cols) > 0:
-        for col in cat_cols:
-            if df_transformed[col].isnull().any():
-                most_frequent = df_transformed[col].mode()[0]
-                df_transformed[col].fillna(most_frequent, inplace=True)
+    # Handle any remaining missing values
+    numeric_cols = df_clean.select_dtypes(include=['number']).columns
+    for col in numeric_cols:
+        if df_clean[col].isnull().any():
+            # Fill missing with median
+            df_clean[col] = df_clean[col].fillna(df_clean[col].median())
 
-    # Log missing values after handling
-    missing_after = df_transformed.isnull().sum().sum()
-    mlflow.log_metric("missing_values_after", missing_after)
+    # Create category_code column (convert categories to numbers)
+    df_clean['category_code'] = pd.Categorical(df_clean['category']).codes
 
-    # ---- 3. FEATURE ENGINEERING ----
-    # Example: Create ratio features for price data
-    if all(col in df_transformed.columns for col in ['price', 'rate']):
-        # Value-for-rating ratio (price efficiency)
-        df_transformed['price_per_rating'] = df_transformed['price'] / df_transformed['rate'].replace(0, 0.1)
+    # Calculate category average price (for potential feature engineering)
+    category_avg_price = df_clean.groupby('category')['price'].mean().to_dict()
+    df_clean['category_avg_price'] = df_clean['category'].map(category_avg_price)
 
-    if all(col in df_transformed.columns for col in ['price', 'count']):
-        # Price per count (bulk pricing indicator)
-        df_transformed['price_per_count'] = df_transformed['price'] / df_transformed['count'].replace(0, 1)
+    # Create price ratio feature (how expensive is this item compared to category average)
+    df_clean['price_ratio'] = df_clean['price'] / df_clean['category_avg_price']
 
-    # ---- 4. HANDLING MULTICOLLINEARITY ----
-    # For a simple version, we'll just track correlation
-    if len(numeric_cols) > 1:
-        corr_matrix = df_transformed[numeric_cols].corr().abs()
-        upper_tri = corr_matrix.where(np.triu(np.ones(corr_matrix.shape), k=1).astype(bool))
-        high_corr = [(i, j, corr_matrix.loc[i, j]) for i in upper_tri.index
-                     for j in upper_tri.columns if upper_tri.loc[i, j] > 0.8]
+    # Log basic transformation metrics
+    mlflow.log_param("final_row_count", len(df_clean))
+    mlflow.log_param("test_size_fraction", test_size)  # Changed parameter name
+    mlflow.log_param("random_state", random_state)
 
-        if high_corr:
-            # Log high correlations for review
-            for i, j, corr in high_corr:
-                mlflow.log_param(f"high_corr_{i}_{j}", f"{corr:.2f}")
-
-    # ---- 5. DATA SPLIT ----
     # Create train-test split
-    df_train, df_test = train_test_split(
-        df_transformed, test_size=test_size, random_state=random_state
+    train_df, test_df = train_test_split(
+        df_clean, test_size=test_size, random_state=random_state
     )
 
-    # Log transformation metrics
-    mlflow.log_param("test_size", test_size)
-    mlflow.log_param("random_state", random_state)
-    mlflow.log_param("train_samples", len(df_train))
-    mlflow.log_param("test_samples", len(df_test))
-    mlflow.log_param("features_count", df_transformed.shape[1])
-    mlflow.log_param("engineered_features", df_transformed.shape[1] - df.shape[1])
+    # Log split sizes
+    mlflow.log_param("train_samples", len(train_df))  # Changed parameter name
+    mlflow.log_param("test_samples", len(test_df))    # Changed parameter name
 
-    print(f"Data transformation complete. Train size: {len(df_train)}, Test size: {len(df_test)}")
-    print(f"Features: {df_transformed.shape[1]} (added {df_transformed.shape[1] - df.shape[1]} new)")
+    # Create price distribution comparison between train and test
+    plt.figure(figsize=(12, 6))
+    plt.subplot(1, 2, 1)
+    sns.histplot(train_df['price'], kde=True, bins=30)
+    plt.title('Train Set Price Distribution')
+    plt.xlabel('Price')
+
+    plt.subplot(1, 2, 2)
+    sns.histplot(test_df['price'], kde=True, bins=30)
+    plt.title('Test Set Price Distribution')
+    plt.xlabel('Price')
+
+    plt.tight_layout()
+
+    # Save figure to MLflow
+    split_comparison_path = "train_test_price_distribution.png"
+    plt.savefig(split_comparison_path)
+    mlflow.log_artifact(split_comparison_path)
+    os.remove(split_comparison_path)
+    plt.close()
+
+    # Feature correlation with price
+    numeric_cols = [col for col in train_df.select_dtypes(include=['number']).columns
+                    if col != 'price' and train_df[col].nunique() > 5]
+
+    # Calculate correlation with price
+    price_correlation = {}
+    for col in numeric_cols:
+        corr = train_df[col].corr(train_df['price'])
+        price_correlation[col] = corr
+
+    # Sort by absolute correlation
+    price_correlation = {k: v for k, v in sorted(
+        price_correlation.items(), key=lambda item: abs(item[1]), reverse=True
+    )}
+
+    # Create correlation with price chart
+    plt.figure(figsize=(12, 8))
+    cols = list(price_correlation.keys())[:10]  # Top 10 correlations
+    corrs = [price_correlation[col] for col in cols]
+
+    colors = ['g' if c > 0 else 'r' for c in corrs]
+    plt.barh(cols, [abs(c) for c in corrs], color=colors)
+    plt.title('Top 10 Feature Correlations with Price')
+    plt.xlabel('Absolute Correlation')
+
+    # Save figure to MLflow
+    price_corr_path = "price_correlation.png"
+    plt.savefig(price_corr_path)
+    mlflow.log_artifact(price_corr_path)
+    os.remove(price_corr_path)
+    plt.close()
+
+    # Log top correlations with price
+    for col, corr in list(price_correlation.items())[:5]:
+        mlflow.log_metric(f"price_corr_{col}", corr)
+
+    print(f"Data transformation complete. Train size: {len(train_df)}, Test size: {len(test_df)}")
+    print(f"Top features correlated with price:")
+    for col, corr in list(price_correlation.items())[:5]:
+        print(f"  {col}: {corr:.3f}")
 
     return {
-        "train": df_train,
-        "test": df_test,
-        "feature_names": list(df_transformed.columns)
+        "train": train_df,
+        "test": test_df,
+        "price_correlations": price_correlation
     }

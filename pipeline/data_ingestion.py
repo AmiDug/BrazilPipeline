@@ -1,106 +1,156 @@
 import pandas as pd
-from sqlalchemy import create_engine
-import mlflow
 import os
-import random
+import mlflow
+from kaggle.api.kaggle_api_extended import KaggleApi
+import numpy as np
+from datetime import datetime
 
 
 def data_ingestion():
+    # Check if data is already downloaded
+    data_dir = "./olist_data"
+    if not os.path.exists(data_dir):
+        print("Downloading Olist E-commerce dataset from Kaggle...")
 
-    # Load data from database
-    engine = create_engine('sqlite:///../instance/Store.sqlite3?mode=ro')
-    df = pd.read_sql_query("SELECT * FROM store", engine)
+        # Authenticate and download (requires kaggle.json in ~/.kaggle/)
+        try:
+            api = KaggleApi()
+            api.authenticate()
+            api.dataset_download_files(
+                'olistbr/brazilian-ecommerce',
+                path=data_dir,
+                unzip=True
+            )
+            print("Dataset downloaded successfully.")
+        except Exception as e:
+            print(f"Error downloading from Kaggle API: {e}")
+            print("Using backup method to load data...")
+            # If Kaggle authentication fails, you can also download manually
+            os.makedirs(data_dir, exist_ok=True)
 
-    # Log sample of original data
-    sample_df = df.head()
-    temp_path = "df_head.csv"
-    sample_df.to_csv(temp_path, index=False)
-    mlflow.log_artifact(temp_path)
-    os.remove(temp_path)
+    # Load the datasets
+    try:
+        print("Loading Olist order items dataset...")
+        order_items_df = pd.read_csv(f"{data_dir}/olist_order_items_dataset.csv")
 
-    # Log original data size
-    mlflow.log_param("original_row_count", len(df))
+        print("Available columns:", order_items_df.columns.tolist())
+        print("Number of orders:", order_items_df['order_id'].nunique())
+        print("Number of products:", order_items_df['product_id'].nunique())
 
-    # Generate synthetic data (always create 400 synthetic items)
-    df = generate_synthetic_data(df)
+        # Create product aggregation by grouping on product_id
+        product_stats = order_items_df.groupby('product_id').agg({
+            'price': ['mean', 'count', 'std'],
+            'freight_value': ['mean']
+        })
 
-    # Log final data size
-    mlflow.log_param("final_row_count", len(df))
+        # Flatten MultiIndex columns
+        product_stats.columns = ['_'.join(col).strip() for col in product_stats.columns.values]
+        product_stats = product_stats.reset_index()
 
-    return df
+        # Rename columns
+        product_stats.rename(columns={
+            'price_mean': 'price',
+            'price_count': 'count',
+            'price_std': 'price_std',
+            'freight_value_mean': 'freight_value'
+        }, inplace=True)
 
+        # Replace NaN with 0 for price_std (happens when count=1)
+        product_stats['price_std'] = product_stats['price_std'].fillna(0)
 
-def generate_synthetic_data(df, total_synthetic=400):
+        # Create synthetic features needed for the model
+        # Set product_id as id
+        product_stats['id'] = product_stats['product_id']
 
-    print(f"Generating {total_synthetic} synthetic store items...")
+        # Create synthetic weight and volume - correlated with price
+        np.random.seed(42)  # For reproducibility
+        product_stats['product_weight_g'] = product_stats['price'] * 2 + np.random.normal(0, 10, len(product_stats))
 
-    # List to store all rows (original + synthetic)
-    all_rows = []
+        # Ensure positive weights
+        product_stats['product_weight_g'] = product_stats['product_weight_g'].clip(10, None)
 
-    # First, add all original rows
-    all_rows.extend(df.to_dict('records'))
+        # Create synthetic volume
+        product_stats['volume_cm3'] = product_stats['product_weight_g'] * 0.8 + np.random.normal(0, 20,
+                                                                                                 len(product_stats))
+        product_stats['volume_cm3'] = product_stats['volume_cm3'].clip(5, None)
 
-    # Get the highest ID
-    max_id = df['id'].max() if not df.empty else 0
+        # Create synthetic categories based on price ranges
+        price_bins = [0, 50, 100, 200, 500, float('inf')]
+        category_names = ['budget', 'economy', 'standard', 'premium', 'luxury']
+        product_stats['category'] = pd.cut(product_stats['price'], bins=price_bins, labels=category_names)
 
-    # Title modifiers for variations
-    title_modifiers = ["Premium", "Deluxe", "Standard", "Basic", "Pro",
-                       "Elite", "Value", "Essential", "Advanced", "Classic"]
-    colors = ["Red", "Blue", "Green", "Black", "White", "Gray", "Purple",
-              "Yellow", "Orange", "Pink"]
-    size_variants = ["Small", "Medium", "Large", "XL", "XXL", "Mini", "Maxi", "Compact"]
+        # Convert category to object type (string) to match validation expectations
+        product_stats['category'] = product_stats['category'].astype(str)
 
-    # Create synthetic variations
-    for i in range(total_synthetic):
-        # Select a random original row to base this synthetic item on
-        original_row = df.iloc[random.randint(0, len(df) - 1)].copy()
+        # Create density feature
+        product_stats['density'] = product_stats['product_weight_g'] / product_stats['volume_cm3']
 
-        # Create a new row based on the original
-        new_row = dict(original_row)
+        # Create price per gram feature
+        product_stats['price_per_gram'] = product_stats['price'] / product_stats['product_weight_g']
 
-        # Assign a new unique ID
-        max_id += 1
-        new_row['id'] = max_id
+        # Create synthetic title and description length as float64 (not int)
+        product_stats['title_length'] = 20.0 + np.random.normal(0, 5, len(product_stats))
+        product_stats['title_length'] = product_stats['title_length'].clip(10, 40).astype(float)
 
-        # Modify the title with random variations
-        original_title = new_row['title']
-        mod_strategy = random.choice([1, 2, 3])
+        product_stats['description_length'] = 100.0 + np.random.normal(0, 20, len(product_stats))
+        product_stats['description_length'] = product_stats['description_length'].clip(50, 200).astype(float)
 
-        if mod_strategy == 1:
-            # Add a modifier
-            modifier = random.choice(title_modifiers)
-            new_row['title'] = f"{modifier} {original_title}"
-        elif mod_strategy == 2:
-            # Add a color
-            color = random.choice(colors)
-            new_row['title'] = f"{color} {original_title}"
-        else:
-            # Add a size/variant indicator
-            size = random.choice(size_variants)
-            new_row['title'] = f"{original_title} - {size} Version"
+        # Create synthetic image count as float64 (not int32)
+        product_stats['image_count'] = np.random.randint(1, 6, len(product_stats)).astype(float)
 
-        # Modify the price (±30%)
-        price_variation = random.uniform(0.7, 1.3)
-        new_row['price'] = round(float(new_row['price']) * price_variation, 2)
+        # Add a synthetic title
+        product_stats['title'] = 'Product ' + product_stats['id'].astype(str)
 
-        # Modify the rating (±1.0 but keep within 1-5 range)
-        rating_variation = random.uniform(-1.0, 1.0)
-        new_row['rate'] = max(1.0, min(5.0, float(new_row['rate']) + rating_variation))
-        new_row['rate'] = round(new_row['rate'], 1)
+        # Add a synthetic description
+        product_stats['description'] = 'Description for product ' + product_stats['id'].astype(str)
 
-        # Modify the count (±50%)
-        count_variation = random.uniform(0.5, 1.5)
-        new_row['count'] = round(float(new_row['count']) * count_variation)
+        # Add a placeholder image URL
+        product_stats['image'] = 'https://example.com/img/' + product_stats['id'].astype(str)
 
-        # Add to the collection
-        all_rows.append(new_row)
+        # Add a derived rating (not in original dataset)
+        product_stats['rate'] = 3.5 + np.random.normal(0, 0.5, len(product_stats))
+        product_stats['rate'] = product_stats['rate'].clip(1, 5).round(1)
 
-    # Create a new DataFrame with all rows
-    expanded_df = pd.DataFrame(all_rows)
+        # Select final columns for our analysis
+        keep_columns = [
+            'id', 'title', 'price', 'description', 'category', 'image', 'rate', 'count',
+            'product_weight_g', 'volume_cm3', 'freight_value', 'title_length',
+            'description_length', 'image_count', 'density', 'price_per_gram'
+        ]
 
-    # Ensure all columns have the original types
-    for col in df.columns:
-        expanded_df[col] = expanded_df[col].astype(df[col].dtype)
+        # Keep only needed columns
+        result_df = product_stats[keep_columns].copy()
 
-    print(f"Dataset expanded from {len(df)} to {len(expanded_df)} rows")
-    return expanded_df
+        # Drop any rows with missing values in critical columns
+        result_df = result_df.dropna(subset=['price', 'product_weight_g', 'volume_cm3'])
+
+        # Ensure all data types match what's expected in validation
+        result_df['price'] = result_df['price'].astype(float)
+        result_df['count'] = result_df['count'].astype(int)
+        result_df['rate'] = result_df['rate'].astype(float)
+        result_df['title_length'] = result_df['title_length'].astype(float)
+        result_df['description_length'] = result_df['description_length'].astype(float)
+        result_df['image_count'] = result_df['image_count'].astype(float)
+        result_df['category'] = result_df['category'].astype(object)
+
+        # Log data statistics
+        print(f"Loaded {len(result_df)} products from Olist order items dataset")
+        print(f"Price range: ${result_df['price'].min():.2f} - ${result_df['price'].max():.2f}")
+
+        # Log MLflow params
+        mlflow.log_param("dataset_source", "Olist Order Items")
+        mlflow.log_param("row_count", len(result_df))
+        mlflow.log_param("price_range", f"${result_df['price'].min():.2f} - ${result_df['price'].max():.2f}")
+
+        # Save and log sample data
+        sample_df = result_df.head(10)
+        temp_path = "olist_sample.csv"
+        sample_df.to_csv(temp_path, index=False)
+        mlflow.log_artifact(temp_path)
+        os.remove(temp_path)
+
+        return result_df
+
+    except Exception as e:
+        print(f"Error processing Olist data: {e}")
+        raise
