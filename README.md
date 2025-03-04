@@ -1,3 +1,5 @@
+ML pipeline for price prediction based on this dataset: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce?select=olist_order_payments_dataset.csv
+
 Analysis by Claude 3.7:
 
 Analysis: Product Price Prediction Results
