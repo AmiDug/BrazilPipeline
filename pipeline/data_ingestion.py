@@ -1,8 +1,8 @@
 import pandas as pd
+import numpy as np
 import os
 import mlflow
 from kaggle.api.kaggle_api_extended import KaggleApi
-import numpy as np
 from datetime import datetime
 
 
@@ -125,8 +125,8 @@ def data_ingestion():
         # Calculate additional features
         product_features['price_to_freight_ratio'] = product_features['price'] / product_features[
             'freight_value_mean'].replace(0, 1)
-        product_features['price_cv'] = product_features['price_variance'] / product_features['price'].replace(0, 1)
 
+        # Add density if both weight and volume exist
         if 'product_weight_g' in product_features.columns and 'volume_cm3' in product_features.columns:
             product_features['density'] = product_features['product_weight_g'] / product_features['volume_cm3'].replace(
                 0, np.nan)
@@ -146,11 +146,38 @@ def data_ingestion():
             product_features = pd.merge(product_features, desc_lengths, left_on='id', right_on='product_id', how='left')
             product_features.drop('product_id', axis=1, inplace=True)
 
+            # Add description-to-price ratio (more expensive items often have shorter descriptions)
+            product_features['description_price_ratio'] = product_features['description_length'] / product_features[
+                'price'].replace(0, np.nan)
+
         if 'product_photos_qty' in products_df.columns:
             photo_counts = products_df[['product_id', 'product_photos_qty']].rename(
                 columns={'product_photos_qty': 'image_count'})
             product_features = pd.merge(product_features, photo_counts, left_on='id', right_on='product_id', how='left')
             product_features.drop('product_id', axis=1, inplace=True)
+
+        # Add seller reputation features
+        if 'seller_id' in order_items_df.columns:
+            # Get seller order count
+            seller_stats = order_items_df.groupby('seller_id').agg({
+                'order_id': 'nunique',
+            }).reset_index()
+            seller_stats.columns = ['seller_id', 'seller_order_count']
+
+            # Merge with product data
+            temp_df = pd.merge(
+                product_data[['product_id', 'seller_id']].drop_duplicates(),
+                seller_stats,
+                on='seller_id'
+            )
+            product_seller_stats = temp_df.groupby('product_id').agg({
+                'seller_order_count': 'mean'
+            }).reset_index()
+
+            product_features = pd.merge(product_features, product_seller_stats,
+                                        left_on='id', right_on='product_id', how='left')
+            if 'product_id' in product_features.columns:
+                product_features.drop('product_id', axis=1, inplace=True)
 
         # Add placeholder columns for validation compatibility
         product_features['title'] = product_features['category'].fillna('Unknown')
@@ -159,6 +186,9 @@ def data_ingestion():
         product_features['rate'] = 0  # Default rating
         product_features['count'] = product_features['order_count']
         product_features['freight_value'] = product_features['freight_value_mean']
+
+        # Log-transform price for better distribution
+        product_features['log_price'] = np.log1p(product_features['price'])
 
         # Fill missing values
         for col in product_features.columns:

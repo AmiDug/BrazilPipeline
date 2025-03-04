@@ -5,65 +5,80 @@ from data_transformation import data_transformation
 from model_training import model_training
 from model_evaluation import model_evaluation
 
-def run_pipeline():
 
+def run_pipeline():
+    """
+    Run the complete Olist product price prediction pipeline
+    with fixes to prevent data leakage
+    """
     # Set up MLflow tracking
     mlflow.set_tracking_uri("http://127.0.0.1:8080")
-    mlflow.set_experiment("Olist-Product-Price-Prediction")
+    mlflow.set_experiment("Olist-Product-Price-Prediction-Fixed")
     mlflow.keras.autolog()
 
-    with mlflow.start_run() as run:
-        # Step 1: Data ingestion - load Olist dataset
+    with mlflow.start_run(run_name="Olist-Pipeline-Fixed") as main_run:
+        # Step 1: Data ingestion
         print("\n" + "=" * 50)
         print("STEP 1: DATA INGESTION")
         print("=" * 50)
-        df = data_ingestion()
+        with mlflow.start_run(nested=True, run_name="Data-Ingestion"):
+            df = data_ingestion()
 
-        # Step 2: Data validation - check data quality
+        # Step 2: Data validation
         print("\n" + "=" * 50)
         print("STEP 2: DATA VALIDATION")
         print("=" * 50)
-        validation_passed, validation_results, df = data_validation(df)
+        with mlflow.start_run(nested=True, run_name="Data-Validation"):
+            validation_passed, validation_results, df = data_validation(df)
 
         if not validation_passed:
             print("Data validation failed. Pipeline halted.")
             print(f"Validation issues: {validation_results}")
             return None
 
-        # Step 3: Data transformation - clean and split data
+        # Step 3: Data transformation - with fixed feature selection
         print("\n" + "=" * 50)
         print("STEP 3: DATA TRANSFORMATION")
         print("=" * 50)
-        data_splits = data_transformation(df)
+        with mlflow.start_run(nested=True, run_name="Data-Transformation"):
+            data_splits = data_transformation(df)
 
-        # Step 4: Model training - train neural network and linear model
+        # Step 4: Model training - without log transform
         print("\n" + "=" * 50)
         print("STEP 4: MODEL TRAINING")
         print("=" * 50)
-        model_results = model_training(
-            data_splits=data_splits,
-            target_column='price',
-            epochs=15,
-            batch_size=32
-        )
+        with mlflow.start_run(nested=True, run_name="Model-Training"):
+            model_results = model_training(
+                data_splits=data_splits,
+                target_column='price',
+                log_transform=False  # FIXED: No log transform to prevent leakage
+            )
 
-        # Step 5: Model evaluation - evaluate on test data
+        # Step 5: Model evaluation
         print("\n" + "=" * 50)
         print("STEP 5: MODEL EVALUATION")
         print("=" * 50)
-        eval_metrics = model_evaluation(
-            model_results=model_results,
-            data_splits=data_splits,
-            target_column='price'
-        )
+        with mlflow.start_run(nested=True, run_name="Model-Evaluation"):
+            eval_metrics = model_evaluation(
+                model_results=model_results,
+                data_splits=data_splits,
+                target_column='price'
+            )
+
+        # Log summary metrics
+        best_model_name = model_results['best_model']
+        mlflow.log_param("best_model", best_model_name)
+        mlflow.log_metric("final_rmse", eval_metrics['rmse'])
+        mlflow.log_metric("final_mae", eval_metrics['mae'])
+        mlflow.log_metric("final_r2", eval_metrics['r2'])
+        mlflow.log_metric("final_mape", eval_metrics['mape'])
 
         # Print final pipeline summary
-        best_model_name = model_results['best_model']
         print("\n" + "=" * 50)
         print("PIPELINE COMPLETED SUCCESSFULLY")
         print("=" * 50)
         print(f"Dataset: Olist Brazilian E-commerce")
-        print(f"Task: Product Price Prediction")
+        print(f"Task: Product Price Prediction (Fixed)")
         print(f"Best model: {best_model_name}")
         print(f"RMSE: R${eval_metrics['rmse']:.2f}")
         print(f"MAE: R${eval_metrics['mae']:.2f}")
@@ -73,8 +88,10 @@ def run_pipeline():
 
         return {
             "model_results": model_results,
-            "evaluation_metrics": eval_metrics
+            "evaluation_metrics": eval_metrics,
+            "run_id": main_run.info.run_id
         }
+
 
 if __name__ == "__main__":
     run_pipeline()
