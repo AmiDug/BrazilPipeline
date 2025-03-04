@@ -1,9 +1,7 @@
 import pandas as pd
-import numpy as np
 import os
 import mlflow
 from kaggle.api.kaggle_api_extended import KaggleApi
-from datetime import datetime
 
 
 def data_ingestion():
