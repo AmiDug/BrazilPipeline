@@ -1,262 +1,207 @@
-import json
-import os
-import mlflow
 import pandas as pd
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
+import os
+import mlflow
 
 
 def data_validation(df):
+    """
+    Validate the dataset by checking for missing values, data types, and distributions
+    """
     print("Starting data validation...")
 
-    # First, ensure required columns exist and have appropriate types
-    required_columns = ['id', 'price', 'category', 'product_weight_g', 'volume_cm3']
-    expected_columns = [
-        'id', 'title', 'price', 'description', 'category', 'image',
-        'rate', 'count', 'product_weight_g', 'volume_cm3', 'freight_value',
-        'title_length', 'description_length', 'image_count', 'density', 'price_per_gram'
-    ]
+    # Check if DataFrame is None or empty
+    if df is None or len(df) == 0:
+        print("Error: DataFrame is empty or None")
+        return False, {"error": "Empty DataFrame"}, None
 
-    # Check if expected columns are missing
-    missing_columns = [col for col in expected_columns if col not in df.columns]
-
-    # Add missing columns with default values
-    for col in missing_columns:
-        if col in ['id', 'title', 'description', 'category', 'image']:
-            df[col] = 'Unknown'  # String default
-        else:
-            df[col] = 0.0  # Numeric default
-
-    # Ensure proper data types
-    dtype_mapping = {
-        'id': 'object',
-        'title': 'object',
-        'price': 'float64',
-        'description': 'object',
-        'category': 'object',
-        'image': 'object',
-        'rate': 'float64',
-        'count': 'int64',
-        'product_weight_g': 'float64',
-        'volume_cm3': 'float64',
-        'freight_value': 'float64',
-        'title_length': 'float64',
-        'description_length': 'float64',
-        'image_count': 'float64',
-        'density': 'float64',
-        'price_per_gram': 'float64'
-    }
-
-    for col, dtype in dtype_mapping.items():
-        if col in df.columns:
-            if dtype.startswith('float') or dtype.startswith('int'):
-                df[col] = pd.to_numeric(df[col], errors='coerce')
-                if dtype.startswith('int'):
-                    df[col] = df[col].fillna(0).astype(int)
-
-    # Configure validation expectations for Olist dataset
-    schema_config = {
-        'expected_columns': expected_columns,
-        'dtypes': dtype_mapping,
-        'ranges': {
-            'price': {'min': 0},  # Prices must be positive
-            'rate': {'min': 0, 'max': 5},  # Ratings between 0-5
-            'count': {'min': 0},  # Allow products with no orders yet
-            'product_weight_g': {'min': 0},  # Weight must be positive
-            'volume_cm3': {'min': 0},  # Volume must be positive
-            'freight_value': {'min': 0}  # Freight value must be positive
-        },
-        'required_columns': required_columns  # Essential fields
-    }
-
-    # Initialize validation tracking
-    validation_passed = True
+    # Create a validation results dictionary
     validation_results = {}
 
-    # Convert all NumPy types to standard Python types for JSON serialization
-    def convert_to_serializable(obj):
-        if isinstance(obj, (np.integer, np.int64)):
-            return int(obj)
-        elif isinstance(obj, (np.floating, np.float64)):
-            return float(obj)
-        elif isinstance(obj, np.ndarray):
-            return obj.tolist()
-        elif isinstance(obj, dict):
-            return {k: convert_to_serializable(v) for k, v in obj.items()}
-        elif isinstance(obj, list):
-            return [convert_to_serializable(i) for i in obj]
-        else:
-            return obj
+    # 1. Check required columns
+    required_columns = ['price', 'product_id', 'order_id', 'product_category_name_english',
+                        'product_weight_g', 'product_length_cm', 'product_height_cm',
+                        'product_width_cm', 'customer_state', 'seller_state']
 
-    # Log any missing columns that were added
+    missing_columns = [col for col in required_columns if col not in df.columns]
+
     if missing_columns:
-        validation_results['added_missing_columns'] = missing_columns
-        print(f"Added missing columns with default values: {missing_columns}")
+        print(f"Warning: Missing required columns: {missing_columns}")
+        validation_results['missing_columns'] = missing_columns
 
-    # Check for missing values in required columns
-    required_with_nulls = {col: int(df[col].isnull().sum()) for col in required_columns
-                           if col in df.columns and df[col].isnull().any()}
+    # 2. Check for missing values in key columns
+    if 'price' not in missing_columns:
+        price_nulls = df['price'].isnull().sum()
+        if price_nulls > 0:
+            print(f"Warning: {price_nulls} missing price values")
+            validation_results['price_nulls'] = int(price_nulls)
 
-    if required_with_nulls:
-        validation_passed = False
-        validation_results['null_in_required'] = required_with_nulls
-        mlflow.log_param('nulls_valid', False)
-    else:
-        mlflow.log_param('nulls_valid', True)
+    # Check categorical columns for nulls
+    categorical_cols = ['product_category_name_english', 'customer_state', 'seller_state',
+                        'payment_type']
+    categorical_nulls = {}
 
-    # Check data types
-    expected_dtypes = schema_config.get('dtypes', {})
-    incorrect_dtypes = {}
-
-    for col, expected_dtype in expected_dtypes.items():
+    for col in categorical_cols:
         if col in df.columns:
-            # Instead of strict equality, check if types are compatible
-            current_dtype = df[col].dtype
-            if expected_dtype.startswith('float') and not pd.api.types.is_float_dtype(current_dtype):
-                incorrect_dtypes[col] = {
-                    'expected': expected_dtype,
-                    'actual': str(current_dtype)
-                }
-            elif expected_dtype.startswith('int') and not pd.api.types.is_integer_dtype(current_dtype):
-                incorrect_dtypes[col] = {
-                    'expected': expected_dtype,
-                    'actual': str(current_dtype)
-                }
-            elif expected_dtype == 'object' and not pd.api.types.is_object_dtype(current_dtype):
-                incorrect_dtypes[col] = {
-                    'expected': expected_dtype,
-                    'actual': str(current_dtype)
-                }
+            nulls = df[col].isnull().sum()
+            if nulls > 0:
+                categorical_nulls[col] = int(nulls)
 
-    if incorrect_dtypes:
-        validation_passed = False
-        validation_results['incorrect_dtypes'] = incorrect_dtypes
-        mlflow.log_param('dtypes_valid', False)
-        mlflow.log_metric('incorrect_dtypes', len(incorrect_dtypes))
+    if categorical_nulls:
+        print(f"Warning: Missing values in categorical columns: {categorical_nulls}")
+        validation_results['categorical_nulls'] = categorical_nulls
+
+    # 3. Check for duplicated products and orders
+    duplicate_products = df.duplicated(['product_id', 'order_id']).sum()
+    if duplicate_products > 0:
+        print(f"Warning: {duplicate_products} duplicated product-order combinations")
+        validation_results['duplicate_products'] = int(duplicate_products)
+
+    # 4. Check data types
+    if 'price' in df.columns and not pd.api.types.is_numeric_dtype(df['price']):
+        print("Warning: Price column is not numeric")
+        validation_results['price_type_error'] = True
+
+    # 5. Check for outliers in price
+    if 'price' in df.columns:
+        q1 = df['price'].quantile(0.25)
+        q3 = df['price'].quantile(0.75)
+        iqr = q3 - q1
+        upper_bound = q3 + 1.5 * iqr
+        price_outliers = (df['price'] > upper_bound).sum()
+
+        if price_outliers > 0:
+            print(f"Warning: {price_outliers} price outliers detected")
+            validation_results['price_outliers'] = int(price_outliers)
+            validation_results['price_upper_bound'] = float(upper_bound)
+
+    # 6. Create visualizations
+    try:
+        # Price distribution
+        plt.figure(figsize=(10, 6))
+        sns.histplot(df['price'].clip(upper=df['price'].quantile(0.95)), bins=50)
+        plt.title('Price Distribution (95th percentile)')
+        plt.xlabel('Price')
+        plt.tight_layout()
+
+        # Save figure for MLflow
+        price_dist_path = "price_distribution.png"
+        plt.savefig(price_dist_path)
+        try:
+            mlflow.log_artifact(price_dist_path)
+        except:
+            pass
+        os.remove(price_dist_path)
+        plt.close()
+
+        # Category distribution
+        if 'product_category_name_english' in df.columns:
+            plt.figure(figsize=(12, 8))
+            top_categories = df['product_category_name_english'].value_counts().head(15)
+            sns.barplot(y=top_categories.index, x=top_categories.values)
+            plt.title('Top 15 Product Categories')
+            plt.xlabel('Count')
+            plt.tight_layout()
+
+            # Save figure for MLflow
+            category_dist_path = "category_distribution.png"
+            plt.savefig(category_dist_path)
+            try:
+                mlflow.log_artifact(category_dist_path)
+            except:
+                pass
+            os.remove(category_dist_path)
+            plt.close()
+
+        # State distribution
+        if 'customer_state' in df.columns:
+            plt.figure(figsize=(12, 6))
+            top_states = df['customer_state'].value_counts().head(10)
+            sns.barplot(x=top_states.index, y=top_states.values)
+            plt.title('Top 10 Customer States')
+            plt.ylabel('Count')
+            plt.tight_layout()
+
+            # Save figure for MLflow
+            state_dist_path = "state_distribution.png"
+            plt.savefig(state_dist_path)
+            try:
+                mlflow.log_artifact(state_dist_path)
+            except:
+                pass
+            os.remove(state_dist_path)
+            plt.close()
+
+        # Freight vs. Price scatter
+        if all(col in df.columns for col in ['freight_value', 'price']):
+            plt.figure(figsize=(10, 6))
+            df_sample = df.sample(min(5000, len(df)))
+            plt.scatter(df_sample['freight_value'], df_sample['price'], alpha=0.5)
+            plt.title('Price vs. Freight Value')
+            plt.xlabel('Freight Value')
+            plt.ylabel('Price')
+            plt.tight_layout()
+
+            # Save figure for MLflow
+            freight_price_path = "freight_vs_price.png"
+            plt.savefig(freight_price_path)
+            try:
+                mlflow.log_artifact(freight_price_path)
+            except:
+                pass
+            os.remove(freight_price_path)
+            plt.close()
+
+    except Exception as e:
+        print(f"Warning: Error creating visualizations: {e}")
+        validation_results['visualization_error'] = str(e)
+
+    # 7. Calculate basic statistics for reporting
+    try:
+        stats = {
+            'total_rows': len(df),
+            'price_mean': float(df['price'].mean()),
+            'price_median': float(df['price'].median()),
+            'price_min': float(df['price'].min()),
+            'price_max': float(df['price'].max()),
+            'total_product_categories': int(df['product_category_name_english'].nunique()),
+            'total_customer_states': int(df['customer_state'].nunique()),
+            'total_seller_states': int(df['seller_state'].nunique())
+        }
+
+        validation_results['stats'] = stats
+
+        print(f"Dataset has {stats['total_rows']} rows")
+        print(
+            f"Price range: ${stats['price_min']:.2f} - ${stats['price_max']:.2f} (median: ${stats['price_median']:.2f})")
+        print(f"Product categories: {stats['total_product_categories']}")
+        print(f"Customer states: {stats['total_customer_states']}")
+        print(f"Seller states: {stats['total_seller_states']}")
+
+        # Log statistics to MLflow
+        try:
+            mlflow.log_metric("mean_price", stats['price_mean'])
+            mlflow.log_metric("median_price", stats['price_median'])
+            mlflow.log_metric("num_categories", stats['total_product_categories'])
+        except:
+            pass
+
+    except Exception as e:
+        print(f"Warning: Error calculating statistics: {e}")
+        validation_results['stats_error'] = str(e)
+
+    # 8. Overall validation decision
+    validation_passed = not bool(
+        missing_columns or
+        ('price_nulls' in validation_results and validation_results['price_nulls'] > 0) or
+        ('price_type_error' in validation_results)
+    )
+
+    if validation_passed:
+        print("Data validation passed")
     else:
-        mlflow.log_param('dtypes_valid', True)
-        mlflow.log_metric('incorrect_dtypes', 0)
-
-    # Check for duplicates in id (should be unique)
-    id_duplicates = int(df['id'].duplicated().sum()) if 'id' in df.columns else 0
-    validation_results['duplicate_ids'] = id_duplicates
-    mlflow.log_metric('duplicate_ids', id_duplicates)
-
-    if id_duplicates > 0:
-        validation_passed = False
-        mlflow.log_param('unique_ids_valid', False)
-    else:
-        mlflow.log_param('unique_ids_valid', True)
-
-    # Range validations
-    range_validations = schema_config.get('ranges', {})
-    range_failures = {}
-
-    for col, ranges in range_validations.items():
-        if col in df.columns and not df[col].isnull().all():
-            min_val, max_val = ranges.get('min'), ranges.get('max')
-            failures = 0
-
-            if min_val is not None and (df[col] < min_val).any():
-                failures += int((df[col] < min_val).sum())
-
-            if max_val is not None and (df[col] > max_val).any():
-                failures += int((df[col] > max_val).sum())
-
-            if failures > 0:
-                range_failures[col] = failures
-
-    if range_failures:
-        validation_passed = False
-        validation_results['range_failures'] = range_failures
-        mlflow.log_param('ranges_valid', False)
-    else:
-        mlflow.log_param('ranges_valid', True)
-
-    # 6. Data distribution analysis and visualization
-    # Create category distribution chart
-    plt.figure(figsize=(12, 6))
-    top_categories = df['category'].value_counts().head(15)
-    sns.barplot(x=top_categories.values, y=top_categories.index)
-    plt.title('Top 15 Product Categories')
-    plt.xlabel('Number of Products')
-    plt.tight_layout()
-
-    # Save figure to MLflow
-    category_chart_path = "category_distribution.png"
-    plt.savefig(category_chart_path)
-    mlflow.log_artifact(category_chart_path)
-    os.remove(category_chart_path)
-    plt.close()
-
-    # Create price distribution
-    plt.figure(figsize=(10, 6))
-    # Use log scale for better visualization
-    plt.hist(df['price'], bins=50, alpha=0.7)
-    plt.title('Price Distribution')
-    plt.xlabel('Price (R$)')
-    plt.ylabel('Count')
-    plt.yscale('log')  # Log scale for better visualization
-    plt.grid(True, alpha=0.3)
-
-    # Save figure to MLflow
-    price_chart_path = "price_distribution.png"
-    plt.savefig(price_chart_path)
-    mlflow.log_artifact(price_chart_path)
-    os.remove(price_chart_path)
-    plt.close()
-
-    # Create weight vs price scatter plot
-    plt.figure(figsize=(10, 6))
-    plt.scatter(df['product_weight_g'], df['price'], alpha=0.3)
-    plt.title('Price vs Weight')
-    plt.xlabel('Weight (g)')
-    plt.ylabel('Price (R$)')
-    plt.grid(True, alpha=0.3)
-
-    # Save figure to MLflow
-    weight_price_path = "weight_vs_price.png"
-    plt.savefig(weight_price_path)
-    mlflow.log_artifact(weight_price_path)
-    os.remove(weight_price_path)
-    plt.close()
-
-    # Correlation matrix of numeric features
-    numeric_cols = df.select_dtypes(include=['number']).columns
-    corr_matrix = df[numeric_cols].corr()
-
-    plt.figure(figsize=(12, 10))
-    mask = np.triu(np.ones_like(corr_matrix, dtype=bool))
-    sns.heatmap(corr_matrix, mask=mask, annot=True, fmt=".2f", cmap='coolwarm',
-                annot_kws={"size": 8}, vmin=-1, vmax=1)
-    plt.title('Feature Correlation Matrix')
-    plt.tight_layout()
-
-    # Save correlation matrix to MLflow
-    corr_matrix_path = "correlation_matrix.png"
-    plt.savefig(corr_matrix_path)
-    mlflow.log_artifact(corr_matrix_path)
-    os.remove(corr_matrix_path)
-    plt.close()
-
-    # Convert all data in validation_results to be JSON serializable
-    validation_results = convert_to_serializable(validation_results)
-
-    # Log overall validation status
-    mlflow.log_param('validation_passed', validation_passed)
-
-    # Save detailed validation results as artifact
-    with open('validation_results.json', 'w') as f:
-        json.dump(validation_results, f)
-
-    mlflow.log_artifact('validation_results.json')
-    os.remove('validation_results.json')
-
-    print(f"Data validation {'passed' if validation_passed else 'failed with warnings'}")
-    if not validation_passed:
-        print(f"Validation issues: {validation_results}")
-        print("Proceeding with pipeline despite validation issues...")
-        validation_passed = True  # Allow pipeline to continue
+        print("Data validation failed with warnings (continuing pipeline)")
 
     return validation_passed, validation_results, df
