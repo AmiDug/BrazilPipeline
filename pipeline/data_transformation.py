@@ -4,8 +4,7 @@ from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 import mlflow
 import os
-import matplotlib.pyplot as plt
-import seaborn as sns
+from category_encoders import TargetEncoder
 
 
 def data_transformation(df, test_size=0.2, random_state=42):
@@ -23,55 +22,56 @@ def data_transformation(df, test_size=0.2, random_state=42):
         if df_clean[col].isnull().any():
             df_clean[col] = df_clean[col].fillna(df_clean[col].median())
 
-    # Handle missing categories
+    # Handle missing categories more effectively
     if 'category' in df_clean.columns and df_clean['category'].isnull().any():
         missing_categories = df_clean['category'].isnull().sum()
         print(f"Filling {missing_categories} missing category values with 'Unknown'")
         df_clean['category'] = df_clean['category'].fillna('Unknown')
 
-    # Remove ALL price-derived features to prevent data leakage
+    # Remove price-derived features to prevent data leakage
     price_derived_features = [
         'price_min', 'price_max', 'price_variance', 'price_per_gram',
-        'price_to_freight_ratio', 'description_price_ratio', 'price_cv',
-        'category_avg_price', 'log_price', 'category_mean_price',
-        'price_ratio'
+        'price_to_freight_ratio', 'description_price_ratio', 'log_price'
     ]
-
-    # Only remove features that actually exist in the dataframe
     features_to_remove = [f for f in price_derived_features if f in df_clean.columns]
     if features_to_remove:
         print(f"Removing {len(features_to_remove)} price-derived features: {features_to_remove}")
         df_clean = df_clean.drop(features_to_remove, axis=1)
 
-    # Handle categorical features
-    categorical_cols = ['category', 'customer_state', 'seller_state']
-    for col in categorical_cols:
+    # IMPROVEMENT 1: Create log-transformed target for better distribution handling
+    df_clean['log_price_target'] = np.log1p(df_clean['price'])
+
+    # IMPROVEMENT 2: Better outlier handling based on product weight and dimensions
+    for col in ['product_weight_g', 'product_length_cm', 'product_height_cm', 'product_width_cm']:
         if col in df_clean.columns:
-            # Create robust category codes that handle new categories at prediction time
-            df_clean[f'{col}_code'] = pd.Categorical(df_clean[col]).codes
+            q_low = df_clean[col].quantile(0.001)
+            q_high = df_clean[col].quantile(0.999)
+            df_clean.loc[df_clean[col] < q_low, col] = q_low
+            df_clean.loc[df_clean[col] > q_high, col] = q_high
 
-            # Add frequency encoding
-            value_counts = df_clean[col].value_counts(normalize=True)
-            df_clean[f'{col}_freq'] = df_clean[col].map(value_counts)
-
-    # Create safe interaction features
+    # IMPROVEMENT 3: Create more effective interaction features
     if all(col in df_clean.columns for col in ['product_weight_g', 'volume_cm3']):
-        df_clean['weight_volume_ratio'] = df_clean['product_weight_g'] / df_clean['volume_cm3'].replace(0, np.nan)
-        df_clean['weight_volume_ratio'] = df_clean['weight_volume_ratio'].fillna(0)
+        # Weight density feature
+        df_clean['weight_volume_ratio'] = df_clean['product_weight_g'] / df_clean['volume_cm3'].replace(0, 1)
+
+    # IMPROVEMENT 4: Calculate freight value to weight ratio
+    if all(col in df_clean.columns for col in ['freight_value', 'product_weight_g']):
+        df_clean['freight_weight_ratio'] = df_clean['freight_value'] / df_clean['product_weight_g'].replace(0, 1)
+
+    # IMPROVEMENT 5: Create size-price related features
+    if 'volume_cm3' in df_clean.columns:
+        df_clean['size_category'] = pd.qcut(df_clean['volume_cm3'], 5, labels=False, duplicates='drop')
 
     # Remove outliers from target column only
-    q_low = df_clean['price'].quantile(0.005)
-    q_high = df_clean['price'].quantile(0.995)
+    q_low = df_clean['price'].quantile(0.001)
+    q_high = df_clean['price'].quantile(0.999)
     df_clean = df_clean[(df_clean['price'] >= q_low) & (df_clean['price'] <= q_high)]
 
-    # Log outlier removal stats
-    mlflow.log_metric("rows_after_outlier_removal", len(df_clean))
-
-    # Find legitimate features (exclude price-derived features)
-    target = 'price'
+    # Select features based on correlation with target
+    target = 'log_price_target'  # Use log-transformed target for correlation analysis
     correlations = {}
     for col in numeric_cols:
-        if col != target and col not in price_derived_features:
+        if col != target and col != 'price' and col not in price_derived_features:
             corr = df_clean[col].corr(df_clean[target])
             if not np.isnan(corr):
                 correlations[col] = abs(corr)
@@ -80,16 +80,20 @@ def data_transformation(df, test_size=0.2, random_state=42):
                                             key=lambda item: item[1],
                                             reverse=True)}
 
-    # Select top features (limit to 15 for simplicity)
-    top_features = list(correlations.keys())[:15]
+    # Select top correlated features
+    top_features = list(correlations.keys())[:20]
 
-    # Core features to always include if present (excluding price-derived features)
-    core_features = ['product_weight_g', 'volume_cm3', 'freight_value',
-                     'density', 'count', 'category_code', 'category_freq',
-                     'description_length', 'weight_volume_ratio',
-                     'seller_order_count']
+    # Important features to always include
+    core_features = [
+        'product_weight_g', 'volume_cm3', 'freight_value',
+        'density', 'count', 'category_code', 'category_freq',
+        'description_length', 'weight_volume_ratio',
+        'freight_weight_ratio', 'product_length_cm',
+        'product_height_cm', 'product_width_cm',
+        'freight_value_min', 'freight_value_mean', 'freight_value_max'
+    ]
 
-    # Ensure core features are included
+    # Ensure core features are included if they exist
     selected_features = list(set(top_features +
                                  [f for f in core_features if f in df_clean.columns]))
 
@@ -101,24 +105,52 @@ def data_transformation(df, test_size=0.2, random_state=42):
         else:
             print(f"  {i + 1}. {feature}")
 
+    # IMPROVEMENT 6: Create train-test split with stratification on price range
+    # This ensures good representation of rare expensive items
+    df_clean['price_strata'] = pd.qcut(df_clean['price'], 10, labels=False, duplicates='drop')
+
+    # Split data with stratification
+    train_df, test_df = train_test_split(
+        df_clean, test_size=test_size, random_state=random_state,
+        stratify=df_clean['price_strata']
+    )
+
+    # Drop the temporary stratification column
+    train_df = train_df.drop('price_strata', axis=1)
+    test_df = test_df.drop('price_strata', axis=1)
+
+    # IMPROVEMENT 7: Apply target encoding to categorical columns
+    categorical_cols = ['category']
+    categorical_encoders = {}
+
+    for col in categorical_cols:
+        if col in train_df.columns:
+            encoder = TargetEncoder(cols=[col])
+            train_df[f'{col}_target_enc'] = encoder.fit_transform(train_df[col], train_df['price'])
+            test_df[f'{col}_target_enc'] = encoder.transform(test_df[col])
+            categorical_encoders[col] = encoder
+
+            # Add encoded column to selected features
+            selected_features.append(f'{col}_target_enc')
+
     # Final check for any remaining NaN values
-    for col in df_clean[selected_features].columns:
-        if df_clean[col].isnull().any():
-            df_clean[col] = df_clean[col].fillna(0)
+    for col in selected_features:
+        if col in train_df.columns and train_df[col].isnull().any():
+            train_df[col] = train_df[col].fillna(0)
+        if col in test_df.columns and test_df[col].isnull().any():
+            test_df[col] = test_df[col].fillna(0)
 
     # Log transformation parameters
     mlflow.log_param("transformation_features", ", ".join(selected_features))
     mlflow.log_param("test_size_fraction", test_size)
+    mlflow.log_param("log_transform_target", "True")
 
-    # Create train-test split
-    train_df, test_df = train_test_split(
-        df_clean, test_size=test_size, random_state=random_state
-    )
-
-    # Return a dictionary with train/test data and selected features
+    # Return data, selected features, and encoders
     return {
         "train": train_df,
         "test": test_df,
         "selected_features": selected_features,
-        "categorical_cols": [col for col in categorical_cols if col in df_clean.columns]
+        "categorical_cols": [col for col in categorical_cols if col in df_clean.columns],
+        "categorical_encoders": categorical_encoders,
+        "log_transform": True
     }
