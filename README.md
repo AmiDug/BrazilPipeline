@@ -1,5 +1,7 @@
 ML pipeline for price prediction based on this dataset: https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce?select=olist_order_payments_dataset.csv
 
+open a local mlflow tracking server from (.venv): mlflow server --backend-store-uri sqlite:///instance/mlflow.db --default-artifact-root ./mlflow-artifacts --host 127.0.0.1 --port 8080
+
 Analysis by Claude 3.7:
 
 Analysis: Product Price Prediction Results
