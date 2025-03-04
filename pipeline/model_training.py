@@ -5,7 +5,7 @@ import tensorflow as tf
 from tensorflow.keras import layers, models
 from tensorflow.keras.regularizers import l2
 from tensorflow.keras.callbacks import EarlyStopping, ReduceLROnPlateau
-from sklearn.preprocessing import StandardScaler, OneHotEncoder
+from sklearn.preprocessing import StandardScaler
 import mlflow
 import os
 
@@ -81,9 +81,9 @@ def model_training(data_splits, target_column='price', epochs=15, batch_size=32)
 
     # Log input shape for models
     input_shape = X_train_final.shape[1]
-    mlflow.log_param("input_feature_count", input_shape)  # Changed parameter name
-    mlflow.log_param("model_train_size", len(X_train_final))  # Changed parameter name
-    mlflow.log_param("model_val_size", len(X_val))  # Changed parameter name
+    mlflow.log_param("input_feature_count", input_shape)
+    mlflow.log_param("model_train_size", len(X_train_final))
+    mlflow.log_param("model_val_size", len(X_val))
 
     # ---- Model 1: Neural Network with Regularization ----
     # Track separately using nested runs
@@ -104,14 +104,14 @@ def model_training(data_splits, target_column='price', epochs=15, batch_size=32)
         )
 
         # Create neural network with regularization
-        model = models.Sequential([
-            layers.Dense(16, activation='relu', kernel_regularizer=l2(0.01),
-                         input_shape=(input_shape,)),
-            layers.Dropout(0.3),
-            layers.Dense(8, activation='relu', kernel_regularizer=l2(0.01)),
-            layers.Dropout(0.3),
-            layers.Dense(1)  # Output layer for price prediction
-        ])
+        # Using Functional API to avoid the input_shape warning
+        inputs = tf.keras.Input(shape=(input_shape,))
+        x = layers.Dense(16, activation='relu', kernel_regularizer=l2(0.01))(inputs)
+        x = layers.Dropout(0.3)(x)
+        x = layers.Dense(8, activation='relu', kernel_regularizer=l2(0.01))(x)
+        x = layers.Dropout(0.3)(x)
+        outputs = layers.Dense(1)(x)
+        model = tf.keras.Model(inputs=inputs, outputs=outputs)
 
         # Compile model
         model.compile(
@@ -161,7 +161,7 @@ def model_training(data_splits, target_column='price', epochs=15, batch_size=32)
         plt.close()
 
         # Make predictions on validation set
-        val_pred = model.predict(X_val).flatten()
+        val_pred = model.predict(X_val, verbose=0).flatten()
 
         # Create prediction vs actual plot
         plt.figure(figsize=(10, 8))
@@ -193,10 +193,11 @@ def model_training(data_splits, target_column='price', epochs=15, batch_size=32)
 
     # ---- Model 2: Linear Model ----
     with mlflow.start_run(nested=True, run_name="Linear_Model"):
-        # Create simple linear model (1 layer, no activation)
-        linear_model = models.Sequential([
-            layers.Dense(1, kernel_regularizer=l2(0.01), input_shape=(input_shape,))
-        ])
+        # Create simple linear model
+        # Using Functional API to avoid the input_shape warning
+        inputs = tf.keras.Input(shape=(input_shape,))
+        outputs = layers.Dense(1, kernel_regularizer=l2(0.01))(inputs)
+        linear_model = tf.keras.Model(inputs=inputs, outputs=outputs)
 
         # Compile model
         linear_model.compile(
@@ -253,7 +254,7 @@ def model_training(data_splits, target_column='price', epochs=15, batch_size=32)
         plt.close()
 
         # Make predictions on validation set
-        linear_val_pred = linear_model.predict(X_val).flatten()
+        linear_val_pred = linear_model.predict(X_val, verbose=0).flatten()
 
         # Create prediction vs actual plot
         plt.figure(figsize=(10, 8))

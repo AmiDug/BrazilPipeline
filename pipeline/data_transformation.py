@@ -9,11 +9,28 @@ import seaborn as sns
 
 
 def data_transformation(df, test_size=0.2, random_state=42):
-
     print("Starting data transformation...")
 
     # Create a copy to avoid modifying the original
     df_clean = df.copy()
+
+    # INITIAL CLEANING: Replace inf with NaN and fill NaN with median for ALL numeric columns
+    print("Cleaning data: replacing inf values and filling NaN values...")
+    numeric_cols = df_clean.select_dtypes(include=['number']).columns
+
+    # First replace inf with NaN
+    df_clean = df_clean.replace([np.inf, -np.inf], np.nan)
+
+    # Count initial NaN values by column for reporting
+    nan_counts = {col: int(df_clean[col].isna().sum()) for col in numeric_cols if df_clean[col].isna().any()}
+    if nan_counts:
+        print(f"NaN values found in columns before cleaning: {nan_counts}")
+
+    # Fill NaN with median for all numeric columns
+    for col in numeric_cols:
+        if df_clean[col].isna().any():
+            median_val = df_clean[col].median()
+            df_clean[col] = df_clean[col].fillna(median_val)
 
     # Remove outliers from price
     # Extremely high or low prices can distort the model
@@ -24,34 +41,61 @@ def data_transformation(df, test_size=0.2, random_state=42):
 
     # Remove outliers from physical dimensions
     for col in ['product_weight_g', 'volume_cm3']:
-        q1 = df_clean[col].quantile(0.01)
-        q3 = df_clean[col].quantile(0.99)
-        df_clean = df_clean[(df_clean[col] >= q1) & (df_clean[col] <= q3)]
+        if col in df_clean.columns:
+            q1 = df_clean[col].quantile(0.01)
+            q3 = df_clean[col].quantile(0.99)
+            df_clean = df_clean[(df_clean[col] >= q1) & (df_clean[col] <= q3)]
 
     # Log outlier removal stats
     mlflow.log_metric("rows_after_outlier_removal", len(df_clean))
     mlflow.log_metric("outliers_removed_percent", 100 * (1 - len(df_clean) / len(df)))
 
-    # Handle any remaining missing values
-    numeric_cols = df_clean.select_dtypes(include=['number']).columns
-    for col in numeric_cols:
-        if df_clean[col].isnull().any():
-            # Fill missing with median
-            df_clean[col] = df_clean[col].fillna(df_clean[col].median())
+    # Handle any missing values
+    if 'category' in df_clean.columns and df_clean['category'].isna().any():
+        print(f"Filling {df_clean['category'].isna().sum()} missing category values with 'Unknown'")
+        df_clean['category'] = df_clean['category'].fillna('Unknown')
 
     # Create category_code column (convert categories to numbers)
-    df_clean['category_code'] = pd.Categorical(df_clean['category']).codes
+    if 'category' in df_clean.columns:
+        df_clean['category_code'] = pd.Categorical(df_clean['category']).codes
 
-    # Calculate category average price (for potential feature engineering)
-    category_avg_price = df_clean.groupby('category')['price'].mean().to_dict()
-    df_clean['category_avg_price'] = df_clean['category'].map(category_avg_price)
+        # Calculate category average price (for potential feature engineering)
+        category_avg_price = df_clean.groupby('category')['price'].mean().to_dict()
+        df_clean['category_avg_price'] = df_clean['category'].map(category_avg_price)
 
-    # Create price ratio feature (how expensive is this item compared to category average)
-    df_clean['price_ratio'] = df_clean['price'] / df_clean['category_avg_price']
+        # Create price ratio feature (how expensive is this item compared to category average)
+        df_clean['price_ratio'] = df_clean['price'] / df_clean['category_avg_price'].replace(0, np.nan)
+
+    # FINAL CLEANING: Check again for any remaining NaN values in ALL numeric columns
+    # This handles any NaN introduced during feature engineering
+    print("Final data cleaning: checking for any remaining NaN values...")
+    numeric_cols = df_clean.select_dtypes(include=['number']).columns
+
+    # Check and report any remaining NaN values
+    remaining_nans = {col: int(df_clean[col].isna().sum()) for col in numeric_cols if df_clean[col].isna().any()}
+    if remaining_nans:
+        print(f"NaN values found in columns after feature engineering: {remaining_nans}")
+
+        # Fill any remaining NaN values with column medians
+        for col in numeric_cols:
+            if df_clean[col].isna().any():
+                median_val = df_clean[col].median()
+                if np.isnan(median_val):  # Handle case where median itself is NaN
+                    median_val = 0
+                df_clean[col] = df_clean[col].fillna(median_val)
+                print(f"Filled NaN values in {col} with median value {median_val}")
+    else:
+        print("No NaN values remain in the dataset.")
+
+    # Verify one last time that no NaN values remain
+    final_check = df_clean.select_dtypes(include=['number']).isna().sum().sum()
+    if final_check > 0:
+        print(f"WARNING: {final_check} NaN values still remain in the dataset. Using 0 as fallback.")
+        df_clean = df_clean.fillna(0)
 
     # Log basic transformation metrics
     mlflow.log_param("final_row_count", len(df_clean))
-    mlflow.log_param("test_size_fraction", test_size)  # Changed parameter name
+    mlflow.log_param("test_size_fraction", test_size)
     mlflow.log_param("random_state", random_state)
 
     # Create train-test split
@@ -60,8 +104,8 @@ def data_transformation(df, test_size=0.2, random_state=42):
     )
 
     # Log split sizes
-    mlflow.log_param("train_samples", len(train_df))  # Changed parameter name
-    mlflow.log_param("test_samples", len(test_df))    # Changed parameter name
+    mlflow.log_param("train_samples", len(train_df))
+    mlflow.log_param("test_samples", len(test_df))
 
     # Create price distribution comparison between train and test
     plt.figure(figsize=(12, 6))

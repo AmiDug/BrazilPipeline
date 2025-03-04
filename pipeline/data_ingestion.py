@@ -7,12 +7,13 @@ from datetime import datetime
 
 
 def data_ingestion():
+    """
+    Load and process Olist datasets to create product features.
+    """
     # Check if data is already downloaded
     data_dir = "./olist_data"
     if not os.path.exists(data_dir):
         print("Downloading Olist E-commerce dataset from Kaggle...")
-
-        # Authenticate and download (requires kaggle.json in ~/.kaggle/)
         try:
             api = KaggleApi()
             api.authenticate()
@@ -25,131 +26,167 @@ def data_ingestion():
         except Exception as e:
             print(f"Error downloading from Kaggle API: {e}")
             print("Using backup method to load data...")
-            # If Kaggle authentication fails, you can also download manually
             os.makedirs(data_dir, exist_ok=True)
 
-    # Load the datasets
     try:
-        print("Loading Olist order items dataset...")
+        print("Loading Olist datasets...")
+
+        # Load core datasets
         order_items_df = pd.read_csv(f"{data_dir}/olist_order_items_dataset.csv")
+        products_df = pd.read_csv(f"{data_dir}/olist_products_dataset.csv")
+        orders_df = pd.read_csv(f"{data_dir}/olist_orders_dataset.csv")
+        reviews_df = pd.read_csv(f"{data_dir}/olist_order_reviews_dataset.csv")
+        category_df = pd.read_csv(f"{data_dir}/product_category_name_translation.csv")
 
-        print("Available columns:", order_items_df.columns.tolist())
-        print("Number of orders:", order_items_df['order_id'].nunique())
-        print("Number of products:", order_items_df['product_id'].nunique())
+        print(f"Total orders: {order_items_df['order_id'].nunique()}")
+        print(f"Total products: {order_items_df['product_id'].nunique()}")
 
-        # Create product aggregation by grouping on product_id
-        product_stats = order_items_df.groupby('product_id').agg({
-            'price': ['mean', 'count', 'std'],
-            'freight_value': ['mean']
+        # Process dates
+        order_items_df['shipping_limit_date'] = pd.to_datetime(order_items_df['shipping_limit_date'])
+        order_items_df['shipping_month'] = order_items_df['shipping_limit_date'].dt.month
+        order_items_df['shipping_weekday'] = order_items_df['shipping_limit_date'].dt.weekday
+
+        # Join product data with categories
+        products_with_categories = pd.merge(
+            products_df,
+            category_df,
+            on='product_category_name',
+            how='left'
+        )
+
+        # Join with reviews to get product ratings
+        reviews_agg = reviews_df.groupby('order_id').agg({
+            'review_score': 'mean'
+        }).reset_index()
+
+        orders_with_reviews = pd.merge(orders_df, reviews_agg, on='order_id', how='left')
+
+        # Join order items with products data
+        product_data = pd.merge(
+            order_items_df,
+            products_with_categories,
+            on='product_id',
+            how='left'
+        )
+
+        # Aggregate features at the product level
+        product_features = product_data.groupby('product_id').agg({
+            # Price statistics
+            'price': ['mean', 'std', 'min', 'max', 'count'],
+            # Freight value statistics
+            'freight_value': ['mean', 'std', 'min', 'max'],
+            # Product characteristics
+            'product_weight_g': ['first'],
+            'product_length_cm': ['first'],
+            'product_height_cm': ['first'],
+            'product_width_cm': ['first'],
+            # Order position statistics
+            'order_item_id': ['mean'],
+            # Unique seller count
+            'seller_id': pd.Series.nunique,
+            # Category name
+            'product_category_name_english': ['first'],
+            # Shipping date statistics
+            'shipping_month': ['mean'],
+            'shipping_weekday': ['mean']
         })
 
-        # Flatten MultiIndex columns
-        product_stats.columns = ['_'.join(col).strip() for col in product_stats.columns.values]
-        product_stats = product_stats.reset_index()
+        # Flatten the MultiIndex columns
+        product_features.columns = ['_'.join(col).strip() for col in product_features.columns.values]
+        product_features = product_features.reset_index()
 
-        # Rename columns
-        product_stats.rename(columns={
+        # Rename columns for clarity
+        product_features.rename(columns={
+            'product_id': 'id',
             'price_mean': 'price',
-            'price_count': 'count',
-            'price_std': 'price_std',
-            'freight_value_mean': 'freight_value'
+            'price_count': 'order_count',
+            'price_std': 'price_variance',
+            'seller_id_nunique': 'unique_seller_count',
+            'order_item_id_mean': 'avg_position_in_order',
+            'product_category_name_english_first': 'category'
         }, inplace=True)
 
-        # Replace NaN with 0 for price_std (happens when count=1)
-        product_stats['price_std'] = product_stats['price_std'].fillna(0)
+        # Rename physical attribute columns
+        for attr in ['weight_g', 'length_cm', 'height_cm', 'width_cm']:
+            old_col = f'product_{attr}_first'
+            new_col = f'product_{attr}'
+            if old_col in product_features.columns:
+                product_features.rename(columns={old_col: new_col}, inplace=True)
 
-        # Create synthetic features needed for the model
-        # Set product_id as id
-        product_stats['id'] = product_stats['product_id']
+        # Calculate volume
+        if all(col in product_features.columns for col in
+               ['product_length_cm', 'product_height_cm', 'product_width_cm']):
+            product_features['volume_cm3'] = (
+                    product_features['product_length_cm'] *
+                    product_features['product_height_cm'] *
+                    product_features['product_width_cm']
+            )
 
-        # Create synthetic weight and volume - correlated with price
-        np.random.seed(42)  # For reproducibility
-        product_stats['product_weight_g'] = product_stats['price'] * 2 + np.random.normal(0, 10, len(product_stats))
+        # Calculate additional features
+        product_features['price_to_freight_ratio'] = product_features['price'] / product_features[
+            'freight_value_mean'].replace(0, 1)
+        product_features['price_cv'] = product_features['price_variance'] / product_features['price'].replace(0, 1)
 
-        # Ensure positive weights
-        product_stats['product_weight_g'] = product_stats['product_weight_g'].clip(10, None)
+        if 'product_weight_g' in product_features.columns and 'volume_cm3' in product_features.columns:
+            product_features['density'] = product_features['product_weight_g'] / product_features['volume_cm3'].replace(
+                0, np.nan)
+            product_features['price_per_gram'] = product_features['price'] / product_features[
+                'product_weight_g'].replace(0, np.nan)
 
-        # Create synthetic volume
-        product_stats['volume_cm3'] = product_stats['product_weight_g'] * 0.8 + np.random.normal(0, 20,
-                                                                                                 len(product_stats))
-        product_stats['volume_cm3'] = product_stats['volume_cm3'].clip(5, None)
+        # Add text-based features
+        if 'product_name_lenght' in products_df.columns:
+            name_lengths = products_df[['product_id', 'product_name_lenght']].rename(
+                columns={'product_name_lenght': 'title_length'})
+            product_features = pd.merge(product_features, name_lengths, left_on='id', right_on='product_id', how='left')
+            product_features.drop('product_id', axis=1, inplace=True)
 
-        # Create synthetic categories based on price ranges
-        price_bins = [0, 50, 100, 200, 500, float('inf')]
-        category_names = ['budget', 'economy', 'standard', 'premium', 'luxury']
-        product_stats['category'] = pd.cut(product_stats['price'], bins=price_bins, labels=category_names)
+        if 'product_description_lenght' in products_df.columns:
+            desc_lengths = products_df[['product_id', 'product_description_lenght']].rename(
+                columns={'product_description_lenght': 'description_length'})
+            product_features = pd.merge(product_features, desc_lengths, left_on='id', right_on='product_id', how='left')
+            product_features.drop('product_id', axis=1, inplace=True)
 
-        # Convert category to object type (string) to match validation expectations
-        product_stats['category'] = product_stats['category'].astype(str)
+        if 'product_photos_qty' in products_df.columns:
+            photo_counts = products_df[['product_id', 'product_photos_qty']].rename(
+                columns={'product_photos_qty': 'image_count'})
+            product_features = pd.merge(product_features, photo_counts, left_on='id', right_on='product_id', how='left')
+            product_features.drop('product_id', axis=1, inplace=True)
 
-        # Create density feature
-        product_stats['density'] = product_stats['product_weight_g'] / product_stats['volume_cm3']
+        # Add placeholder columns for validation compatibility
+        product_features['title'] = product_features['category'].fillna('Unknown')
+        product_features['description'] = "Product description"
+        product_features['image'] = "image_url"
+        product_features['rate'] = 0  # Default rating
+        product_features['count'] = product_features['order_count']
+        product_features['freight_value'] = product_features['freight_value_mean']
 
-        # Create price per gram feature
-        product_stats['price_per_gram'] = product_stats['price'] / product_stats['product_weight_g']
+        # Fill missing values
+        for col in product_features.columns:
+            if product_features[col].dtype in [np.float64, np.float32]:
+                product_features[col] = product_features[col].fillna(0)
 
-        # Create synthetic title and description length as float64 (not int)
-        product_stats['title_length'] = 20.0 + np.random.normal(0, 5, len(product_stats))
-        product_stats['title_length'] = product_stats['title_length'].clip(10, 40).astype(float)
-
-        product_stats['description_length'] = 100.0 + np.random.normal(0, 20, len(product_stats))
-        product_stats['description_length'] = product_stats['description_length'].clip(50, 200).astype(float)
-
-        # Create synthetic image count as float64 (not int32)
-        product_stats['image_count'] = np.random.randint(1, 6, len(product_stats)).astype(float)
-
-        # Add a synthetic title
-        product_stats['title'] = 'Product ' + product_stats['id'].astype(str)
-
-        # Add a synthetic description
-        product_stats['description'] = 'Description for product ' + product_stats['id'].astype(str)
-
-        # Add a placeholder image URL
-        product_stats['image'] = 'https://example.com/img/' + product_stats['id'].astype(str)
-
-        # Add a derived rating (not in original dataset)
-        product_stats['rate'] = 3.5 + np.random.normal(0, 0.5, len(product_stats))
-        product_stats['rate'] = product_stats['rate'].clip(1, 5).round(1)
-
-        # Select final columns for our analysis
-        keep_columns = [
-            'id', 'title', 'price', 'description', 'category', 'image', 'rate', 'count',
-            'product_weight_g', 'volume_cm3', 'freight_value', 'title_length',
-            'description_length', 'image_count', 'density', 'price_per_gram'
-        ]
-
-        # Keep only needed columns
-        result_df = product_stats[keep_columns].copy()
-
-        # Drop any rows with missing values in critical columns
-        result_df = result_df.dropna(subset=['price', 'product_weight_g', 'volume_cm3'])
-
-        # Ensure all data types match what's expected in validation
-        result_df['price'] = result_df['price'].astype(float)
-        result_df['count'] = result_df['count'].astype(int)
-        result_df['rate'] = result_df['rate'].astype(float)
-        result_df['title_length'] = result_df['title_length'].astype(float)
-        result_df['description_length'] = result_df['description_length'].astype(float)
-        result_df['image_count'] = result_df['image_count'].astype(float)
-        result_df['category'] = result_df['category'].astype(object)
+        # Ensure order_count is integer type
+        product_features['order_count'] = product_features['order_count'].astype(int)
 
         # Log data statistics
-        print(f"Loaded {len(result_df)} products from Olist order items dataset")
-        print(f"Price range: ${result_df['price'].min():.2f} - ${result_df['price'].max():.2f}")
+        print(f"Processed {len(product_features)} products from Olist datasets")
+        print(f"Price range: ${product_features['price'].min():.2f} - ${product_features['price'].max():.2f}")
+        print(f"Average orders per product: {product_features['order_count'].mean():.2f}")
 
-        # Log MLflow params
-        mlflow.log_param("dataset_source", "Olist Order Items")
-        mlflow.log_param("row_count", len(result_df))
-        mlflow.log_param("price_range", f"${result_df['price'].min():.2f} - ${result_df['price'].max():.2f}")
+        # Log MLflow parameters
+        mlflow.log_param("dataset_source", "Merged Olist Datasets")
+        mlflow.log_param("product_count", len(product_features))
+        mlflow.log_param("price_range",
+                         f"${product_features['price'].min():.2f} - ${product_features['price'].max():.2f}")
 
         # Save and log sample data
-        sample_df = result_df.head(10)
+        sample_df = product_features.head(10)
         temp_path = "olist_sample.csv"
         sample_df.to_csv(temp_path, index=False)
         mlflow.log_artifact(temp_path)
         os.remove(temp_path)
 
-        return result_df
+        return product_features
 
     except Exception as e:
         print(f"Error processing Olist data: {e}")

@@ -10,7 +10,7 @@ def run_pipeline():
     # Set up MLflow tracking
     mlflow.set_tracking_uri("http://127.0.0.1:8080")
     mlflow.set_experiment("Olist-Product-Price-Prediction")
-    mlflow.autolog()
+    mlflow.keras.autolog()
 
     with mlflow.start_run() as run:
         # Step 1: Data ingestion - load Olist dataset
