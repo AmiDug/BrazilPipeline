@@ -14,87 +14,94 @@ def data_transformation(df, test_size=0.2, random_state=42):
     # Create a copy to avoid modifying the original
     df_clean = df.copy()
 
-    # INITIAL CLEANING: Replace inf with NaN and fill NaN with median for ALL numeric columns
+    # Basic cleaning: Replace inf with NaN and fill NaN with median values
     print("Cleaning data: replacing inf values and filling NaN values...")
     numeric_cols = df_clean.select_dtypes(include=['number']).columns
-
-    # First replace inf with NaN
     df_clean = df_clean.replace([np.inf, -np.inf], np.nan)
 
-    # Count initial NaN values by column for reporting
-    nan_counts = {col: int(df_clean[col].isna().sum()) for col in numeric_cols if df_clean[col].isna().any()}
-    if nan_counts:
-        print(f"NaN values found in columns before cleaning: {nan_counts}")
-
-    # Fill NaN with median for all numeric columns
     for col in numeric_cols:
-        if df_clean[col].isna().any():
-            median_val = df_clean[col].median()
-            df_clean[col] = df_clean[col].fillna(median_val)
+        if df_clean[col].isnull().any():
+            df_clean[col] = df_clean[col].fillna(df_clean[col].median())
+
+    # Handle missing categories
+    if 'category' in df_clean.columns and df_clean['category'].isnull().any():
+        missing_categories = df_clean['category'].isnull().sum()
+        print(f"Filling {missing_categories} missing category values with 'Unknown'")
+        df_clean['category'] = df_clean['category'].fillna('Unknown')
+
+    # Remove leaky features that use price information
+    leaky_features = [
+        'price_min', 'price_max', 'price_ratio', 'price_variance',
+        'price_cv', 'category_avg_price', 'price_per_gram'
+    ]
+
+    # Only remove features that actually exist in the dataframe
+    leaky_features = [f for f in leaky_features if f in df_clean.columns]
+    if leaky_features:
+        print(f"Removing {len(leaky_features)} price-derived features: {leaky_features}")
+
+    # Create category_code from category (legitimately useful feature)
+    if 'category' in df_clean.columns:
+        df_clean['category_code'] = pd.Categorical(df_clean['category']).codes
 
     # Remove outliers from price
-    # Extremely high or low prices can distort the model
     q1 = df_clean['price'].quantile(0.01)  # 1st percentile
     q3 = df_clean['price'].quantile(0.99)  # 99th percentile
-
     df_clean = df_clean[(df_clean['price'] >= q1) & (df_clean['price'] <= q3)]
-
-    # Remove outliers from physical dimensions
-    for col in ['product_weight_g', 'volume_cm3']:
-        if col in df_clean.columns:
-            q1 = df_clean[col].quantile(0.01)
-            q3 = df_clean[col].quantile(0.99)
-            df_clean = df_clean[(df_clean[col] >= q1) & (df_clean[col] <= q3)]
 
     # Log outlier removal stats
     mlflow.log_metric("rows_after_outlier_removal", len(df_clean))
     mlflow.log_metric("outliers_removed_percent", 100 * (1 - len(df_clean) / len(df)))
 
-    # Handle any missing values
-    if 'category' in df_clean.columns and df_clean['category'].isna().any():
-        print(f"Filling {df_clean['category'].isna().sum()} missing category values with 'Unknown'")
-        df_clean['category'] = df_clean['category'].fillna('Unknown')
+    # Find most correlated legitimate features
+    target = 'price'
 
-    # Create category_code column (convert categories to numbers)
-    if 'category' in df_clean.columns:
-        df_clean['category_code'] = pd.Categorical(df_clean['category']).codes
+    # Get correlations for non-leaky numeric features
+    correlations = {}
+    for col in numeric_cols:
+        if col != target and col not in leaky_features:
+            corr = df_clean[col].corr(df_clean[target])
+            if not np.isnan(corr):
+                correlations[col] = abs(corr)
 
-        # Calculate category average price (for potential feature engineering)
-        category_avg_price = df_clean.groupby('category')['price'].mean().to_dict()
-        df_clean['category_avg_price'] = df_clean['category'].map(category_avg_price)
+    # Sort by correlation strength
+    correlations = {k: v for k, v in sorted(correlations.items(),
+                                            key=lambda item: item[1],
+                                            reverse=True)}
 
-        # Create price ratio feature (how expensive is this item compared to category average)
-        df_clean['price_ratio'] = df_clean['price'] / df_clean['category_avg_price'].replace(0, np.nan)
+    # Select top features (limit to 15 for simplicity and performance)
+    top_features = list(correlations.keys())[:15]
 
-    # FINAL CLEANING: Check again for any remaining NaN values in ALL numeric columns
-    # This handles any NaN introduced during feature engineering
+    # Core features to always include if present
+    core_features = ['product_weight_g', 'volume_cm3', 'freight_value',
+                     'density', 'count', 'category_code']
+
+    # Ensure core features are included
+    selected_features = list(set(top_features +
+                                 [f for f in core_features if f in df_clean.columns]))
+
+    print(f"Selected {len(selected_features)} legitimate features:")
+    for i, feature in enumerate(selected_features):
+        corr_value = correlations.get(feature, float('nan'))
+        if not np.isnan(corr_value):
+            print(f"  {i + 1}. {feature} (correlation: {corr_value:.3f})")
+        else:
+            print(f"  {i + 1}. {feature}")
+
+    # Final check for any remaining NaN values
     print("Final data cleaning: checking for any remaining NaN values...")
-    numeric_cols = df_clean.select_dtypes(include=['number']).columns
+    remaining_nans = False
+    for col in df_clean[selected_features].columns:
+        if df_clean[col].isnull().any():
+            remaining_nans = True
+            df_clean[col] = df_clean[col].fillna(0)
 
-    # Check and report any remaining NaN values
-    remaining_nans = {col: int(df_clean[col].isna().sum()) for col in numeric_cols if df_clean[col].isna().any()}
-    if remaining_nans:
-        print(f"NaN values found in columns after feature engineering: {remaining_nans}")
-
-        # Fill any remaining NaN values with column medians
-        for col in numeric_cols:
-            if df_clean[col].isna().any():
-                median_val = df_clean[col].median()
-                if np.isnan(median_val):  # Handle case where median itself is NaN
-                    median_val = 0
-                df_clean[col] = df_clean[col].fillna(median_val)
-                print(f"Filled NaN values in {col} with median value {median_val}")
-    else:
+    if not remaining_nans:
         print("No NaN values remain in the dataset.")
-
-    # Verify one last time that no NaN values remain
-    final_check = df_clean.select_dtypes(include=['number']).isna().sum().sum()
-    if final_check > 0:
-        print(f"WARNING: {final_check} NaN values still remain in the dataset. Using 0 as fallback.")
-        df_clean = df_clean.fillna(0)
 
     # Log basic transformation metrics
     mlflow.log_param("final_row_count", len(df_clean))
+    mlflow.log_param("selected_features", ", ".join(selected_features))
     mlflow.log_param("test_size_fraction", test_size)
     mlflow.log_param("random_state", random_state)
 
@@ -129,12 +136,12 @@ def data_transformation(df, test_size=0.2, random_state=42):
     plt.close()
 
     # Feature correlation with price
-    numeric_cols = [col for col in train_df.select_dtypes(include=['number']).columns
-                    if col != 'price' and train_df[col].nunique() > 5]
+    corr_features = [col for col in selected_features if col in train_df.columns
+                     and col != 'price' and train_df[col].nunique() > 5]
 
     # Calculate correlation with price
     price_correlation = {}
-    for col in numeric_cols:
+    for col in corr_features:
         corr = train_df[col].corr(train_df['price'])
         price_correlation[col] = corr
 
@@ -169,8 +176,10 @@ def data_transformation(df, test_size=0.2, random_state=42):
     for col, corr in list(price_correlation.items())[:5]:
         print(f"  {col}: {corr:.3f}")
 
+    # Add selected features to the return dictionary for use in model_training
     return {
         "train": train_df,
         "test": test_df,
-        "price_correlations": price_correlation
+        "price_correlations": price_correlation,
+        "selected_features": selected_features
     }

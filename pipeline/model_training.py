@@ -16,30 +16,20 @@ def model_training(data_splits, target_column='price', epochs=15, batch_size=32)
     # Extract data
     train_df = data_splits['train']
 
-    # Feature engineering - separate numeric and categorical features
-    # Keep only relevant features for pricing model
-    selected_numeric_features = [
-        'product_weight_g', 'volume_cm3', 'freight_value',
-        'description_length', 'image_count', 'density', 'price_per_gram',
-        'count'
-    ]
+    # Get selected features from data_transformation
+    if 'selected_features' in data_splits:
+        valid_numeric_features = data_splits['selected_features']
+    else:
+        # Fallback to basic features if not provided
+        valid_numeric_features = [
+            'product_weight_g', 'volume_cm3', 'freight_value',
+            'description_length', 'image_count', 'density', 'count',
+            'category_code'
+        ]
+        # Only use features that actually exist in the dataframe
+        valid_numeric_features = [f for f in valid_numeric_features if f in train_df.columns]
 
-    # Try to use category_code if it exists, otherwise ignore
-    if 'category_code' in train_df.columns:
-        selected_numeric_features.append('category_code')
-
-    # Try to use category_avg_price if it exists, otherwise ignore
-    if 'category_avg_price' in train_df.columns:
-        selected_numeric_features.append('category_avg_price')
-
-    # Try to use price_ratio if it exists, otherwise ignore
-    if 'price_ratio' in train_df.columns:
-        selected_numeric_features.append('price_ratio')
-
-    # Keep only numeric features for simplicity
-    valid_numeric_features = [col for col in selected_numeric_features if col in train_df.columns]
-
-    print(f"Using features: {valid_numeric_features}")
+    print(f"Using {len(valid_numeric_features)} features: {valid_numeric_features}")
 
     # Select X and y
     X_train = train_df[valid_numeric_features].copy()
