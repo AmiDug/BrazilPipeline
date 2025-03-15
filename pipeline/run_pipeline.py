@@ -13,72 +13,59 @@ def run_pipeline():
     # Set up MLflow tracking
     try:
         mlflow.set_tracking_uri("http://127.0.0.1:8080")
-        mlflow.set_experiment("Olist-Price-Prediction-Simplified")
+        mlflow.set_experiment("Olist-Price-Prediction-CV")
     except Exception as e:
-        print(f"Warning: MLflow setup error (continuing without tracking): {e}")
-
-    def print_step(step_num, step_name):
-        """Helper function to print step headers"""
-        print(f"\n{'=' * 50}\nSTEP {step_num}: {step_name}\n{'=' * 50}")
-
-    def run_step(step_num, step_name, func, critical=True, **kwargs):
-        """Run a pipeline step with standardized error handling"""
-        print_step(step_num, step_name)
-        try:
-            return func(**kwargs)
-        except Exception as e:
-            error_type = "Error" if critical else "Warning"
-            print(f"{error_type}: {step_name} failed: {e}")
-            if critical:
-                print(traceback.format_exc())
-                return None
-            return kwargs.get('default_return')
+        print(f"Warning: MLflow setup error: {e}")
 
     try:
         with mlflow.start_run() as run:
-            # Step 1: Data Ingestion
-            df = run_step(1, "DATA INGESTION", data_ingestion)
+            # Step 1: Data ingestion
+            print("\n" + "=" * 50 + "\nSTEP 1: DATA INGESTION\n" + "=" * 50)
+            df = data_ingestion()
             if df is None or len(df) == 0:
-                print("Error: Data ingestion failed. Pipeline cannot continue.")
+                print("Error: Data ingestion failed.")
                 return None
 
-            # Step 2: Data Validation
-            _, _, df = run_step(2, "DATA VALIDATION", data_validation,
-                                critical=False, default_return=(False, {}, df), df=df)
+            # Step 2: Data validation
+            print("\n" + "=" * 50 + "\nSTEP 2: DATA VALIDATION\n" + "=" * 50)
+            try:
+                _, _, df = data_validation(df)
+            except Exception as e:
+                print(f"Warning: Data validation error: {e}")
 
-            # Step 3: Data Transformation
-            data_splits = run_step(3, "DATA TRANSFORMATION", data_transformation, df=df)
+            # Step 3: Data transformation
+            print("\n" + "=" * 50 + "\nSTEP 3: DATA TRANSFORMATION\n" + "=" * 50)
+            data_splits = data_transformation(df)
             if data_splits is None:
                 return None
 
-            # Step 4: Model Training
-            training_results = run_step(4, "MODEL TRAINING", model_training,
-                                        data_splits=data_splits, target_column='price')
+            # Step 4: Model training
+            print("\n" + "=" * 50 + "\nSTEP 4: MODEL TRAINING\n" + "=" * 50)
+            training_results = model_training(data_splits=data_splits, target_column='price')
             if training_results is None:
                 return None
 
-            # Step 5: Model Evaluation
-            evaluation_results = run_step(5, "MODEL EVALUATION", model_evaluation,
-                                          training_results=training_results,
-                                          data_splits=data_splits, target_column='price')
+            # Step 5: Model evaluation
+            print("\n" + "=" * 50 + "\nSTEP 5: MODEL EVALUATION\n" + "=" * 50)
+            evaluation_results = model_evaluation(
+                training_results=training_results,
+                data_splits=data_splits,
+                target_column='price'
+            )
             if evaluation_results is None:
                 return None
 
             # Print final summary
+            best_model_name = evaluation_results['best_model_name']
             metrics = evaluation_results['metrics']
-            print(f"\n{'=' * 50}\nPIPELINE COMPLETED SUCCESSFULLY\n{'=' * 50}")
-            print(f"Dataset: Olist E-commerce Dataset")
-            print(f"Best model: {evaluation_results['best_model_name']}")
-            print(f"RMSE: R${metrics['rmse']:.2f} | MAE: R${metrics['mae']:.2f}")
-            print(f"R²: {metrics['r2']:.4f} | MAPE: {metrics['mape']:.2f}%")
-            print('=' * 50)
+            print("\n" + "=" * 50 + "\nPIPELINE COMPLETED SUCCESSFULLY\n" + "=" * 50)
+            print(f"Best model: {best_model_name}")
+            print(f"R²: {metrics['r2']:.4f} | RMSE: R${metrics['rmse']:.2f}")
+            print("=" * 50)
 
-            return {
-                "training_results": training_results,
-                "evaluation_results": evaluation_results
-            }
+            return {"training_results": training_results, "evaluation_results": evaluation_results}
     except Exception as e:
-        print(f"Critical error in pipeline: {e}")
+        print(f"Critical error: {e}")
         print(traceback.format_exc())
         return None
 
