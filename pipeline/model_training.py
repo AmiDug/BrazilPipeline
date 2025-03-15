@@ -1,3 +1,5 @@
+import os
+os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'
 import pandas as pd
 import numpy as np
 import tensorflow as tf
@@ -8,6 +10,7 @@ from sklearn.preprocessing import StandardScaler
 from sklearn.tree import DecisionTreeRegressor
 from sklearn.ensemble import RandomForestRegressor, GradientBoostingRegressor
 from sklearn.metrics import r2_score, mean_squared_error
+from sklearn.model_selection import KFold, cross_val_score
 import mlflow
 
 
@@ -31,7 +34,7 @@ def model_training(data_splits, target_column='price'):
     X_train = train_df[features].copy()
     y_train = train_df[target_column].values
 
-    # Prepare validation split
+    # Prepare validation split (keep this for neural network)
     val_size = int(0.2 * len(X_train))
     X_val = X_train.iloc[-val_size:].copy()
     y_val = y_train[-val_size:]
@@ -41,153 +44,122 @@ def model_training(data_splits, target_column='price'):
     print(f"Training data: {X_train_final.shape[0]} samples, {X_train_final.shape[1]} features")
     print(f"Validation data: {X_val.shape[0]} samples")
 
+    # Set up 5-fold cross-validation
+    kf = KFold(n_splits=5, shuffle=True, random_state=42)
+
     # Log feature list
     try:
         mlflow.log_param("feature_count", len(features))
         top_features = min(10, len(features))
         mlflow.log_param("top_features", ", ".join(features[:top_features]))
     except:
-        print("Warning: Could not log to MLflow (continuing)")
+        pass
 
     # Dictionary to store all models and their performance
     model_results = {}
 
-    # 1. Decision Tree
+    # 1. Decision Tree with cross-validation
     with mlflow.start_run(nested=True, run_name="Decision_Tree"):
         print("Training Decision Tree model...")
-        dt_model = DecisionTreeRegressor(
-            max_depth=8,
-            min_samples_split=10,
-            random_state=42
-        )
-        dt_model.fit(X_train_final, y_train_final)
+        dt_model = DecisionTreeRegressor(max_depth=8, min_samples_split=10, random_state=42)
 
-        # Evaluate on validation data
-        dt_val_pred = dt_model.predict(X_val)
-        dt_val_mse = mean_squared_error(y_val, dt_val_pred)
-        dt_val_rmse = np.sqrt(dt_val_mse)
-        dt_val_r2 = r2_score(y_val, dt_val_pred)
+        # Get cross-validation scores
+        dt_cv_scores = cross_val_score(dt_model, X_train, y_train, cv=kf, scoring='r2')
+        dt_cv_mean = dt_cv_scores.mean()
+        dt_cv_std = dt_cv_scores.std()
 
-        # Log metrics
-        try:
-            mlflow.log_metric("val_mse", dt_val_mse)
-            mlflow.log_metric("val_rmse", dt_val_rmse)
-            mlflow.log_metric("val_r2", dt_val_r2)
-        except:
-            pass
+        # Train on full dataset
+        dt_model.fit(X_train, y_train)
 
-        print(f"Decision Tree - Validation RMSE: {dt_val_rmse:.2f}, R²: {dt_val_r2:.2f}")
-
-        # Feature importance
+        # Get feature importance
         dt_importance = pd.DataFrame({
             'feature': features,
             'importance': dt_model.feature_importances_
         }).sort_values('importance', ascending=False)
 
-        print("\nTop 10 Decision Tree feature importances:")
-        for idx, row in dt_importance.head(10).iterrows():
-            print(f"  {row['feature']}: {row['importance']:.4f}")
+        print(f"Decision Tree - CV R²: {dt_cv_mean:.4f} ± {dt_cv_std:.4f}")
+        try:
+            mlflow.log_metric("cv_r2", dt_cv_mean)
+        except:
+            pass
 
         # Store model and metrics
         model_results['decision_tree'] = {
             'model': dt_model,
-            'val_rmse': dt_val_rmse,
-            'val_r2': dt_val_r2,
+            'cv_r2': dt_cv_mean,
+            'cv_r2_std': dt_cv_std,
             'feature_importance': dt_importance
         }
 
-    # 2. Random Forest
+    # 2. Random Forest with cross-validation
     with mlflow.start_run(nested=True, run_name="Random_Forest"):
         print("Training Random Forest model...")
-        rf_model = RandomForestRegressor(
-            n_estimators=100,
-            max_depth=10,
-            min_samples_split=5,
-            random_state=42,
-            n_jobs=-1
-        )
-        rf_model.fit(X_train_final, y_train_final)
+        rf_model = RandomForestRegressor(n_estimators=100, max_depth=10, min_samples_split=5,
+                                         random_state=42, n_jobs=-1)
 
-        # Evaluate on validation data
-        rf_val_pred = rf_model.predict(X_val)
-        rf_val_mse = mean_squared_error(y_val, rf_val_pred)
-        rf_val_rmse = np.sqrt(rf_val_mse)
-        rf_val_r2 = r2_score(y_val, rf_val_pred)
+        # Get cross-validation scores
+        rf_cv_scores = cross_val_score(rf_model, X_train, y_train, cv=kf, scoring='r2')
+        rf_cv_mean = rf_cv_scores.mean()
+        rf_cv_std = rf_cv_scores.std()
 
-        # Log metrics
-        try:
-            mlflow.log_metric("val_mse", rf_val_mse)
-            mlflow.log_metric("val_rmse", rf_val_rmse)
-            mlflow.log_metric("val_r2", rf_val_r2)
-        except:
-            pass
+        # Train on full dataset
+        rf_model.fit(X_train, y_train)
 
-        print(f"Random Forest - Validation RMSE: {rf_val_rmse:.2f}, R²: {rf_val_r2:.2f}")
-
-        # Feature importance
+        # Get feature importance
         rf_importance = pd.DataFrame({
             'feature': features,
             'importance': rf_model.feature_importances_
         }).sort_values('importance', ascending=False)
 
-        print("\nTop 10 Random Forest feature importances:")
-        for idx, row in rf_importance.head(10).iterrows():
-            print(f"  {row['feature']}: {row['importance']:.4f}")
+        print(f"Random Forest - CV R²: {rf_cv_mean:.4f} ± {rf_cv_std:.4f}")
+        try:
+            mlflow.log_metric("cv_r2", rf_cv_mean)
+        except:
+            pass
 
         # Store model and metrics
         model_results['random_forest'] = {
             'model': rf_model,
-            'val_rmse': rf_val_rmse,
-            'val_r2': rf_val_r2,
+            'cv_r2': rf_cv_mean,
+            'cv_r2_std': rf_cv_std,
             'feature_importance': rf_importance
         }
 
-    # 3. Gradient Boosting
+    # 3. Gradient Boosting with cross-validation
     with mlflow.start_run(nested=True, run_name="Gradient_Boosting"):
         print("Training Gradient Boosting model...")
-        gb_model = GradientBoostingRegressor(
-            n_estimators=100,
-            max_depth=5,
-            learning_rate=0.1,
-            random_state=42
-        )
-        gb_model.fit(X_train_final, y_train_final)
+        gb_model = GradientBoostingRegressor(n_estimators=100, max_depth=5, learning_rate=0.1,
+                                             random_state=42)
 
-        # Evaluate on validation data
-        gb_val_pred = gb_model.predict(X_val)
-        gb_val_mse = mean_squared_error(y_val, gb_val_pred)
-        gb_val_rmse = np.sqrt(gb_val_mse)
-        gb_val_r2 = r2_score(y_val, gb_val_pred)
+        # Get cross-validation scores
+        gb_cv_scores = cross_val_score(gb_model, X_train, y_train, cv=kf, scoring='r2')
+        gb_cv_mean = gb_cv_scores.mean()
+        gb_cv_std = gb_cv_scores.std()
 
-        # Log metrics
-        try:
-            mlflow.log_metric("val_mse", gb_val_mse)
-            mlflow.log_metric("val_rmse", gb_val_rmse)
-            mlflow.log_metric("val_r2", gb_val_r2)
-        except:
-            pass
+        # Train on full dataset
+        gb_model.fit(X_train, y_train)
 
-        print(f"Gradient Boosting - Validation RMSE: {gb_val_rmse:.2f}, R²: {gb_val_r2:.2f}")
-
-        # Feature importance
+        # Get feature importance
         gb_importance = pd.DataFrame({
             'feature': features,
             'importance': gb_model.feature_importances_
         }).sort_values('importance', ascending=False)
 
-        print("\nTop 10 Gradient Boosting feature importances:")
-        for idx, row in gb_importance.head(10).iterrows():
-            print(f"  {row['feature']}: {row['importance']:.4f}")
+        print(f"Gradient Boosting - CV R²: {gb_cv_mean:.4f} ± {gb_cv_std:.4f}")
+        try:
+            mlflow.log_metric("cv_r2", gb_cv_mean)
+        except:
+            pass
 
         # Store model and metrics
         model_results['gradient_boosting'] = {
             'model': gb_model,
-            'val_rmse': gb_val_rmse,
-            'val_r2': gb_val_r2,
+            'cv_r2': gb_cv_mean,
+            'cv_r2_std': gb_cv_std,
             'feature_importance': gb_importance
         }
 
-    # 4. Neural Network (simplified from previous implementation)
+    # 4. Neural Network (unchanged)
     with mlflow.start_run(nested=True, run_name="Neural_Network"):
         print("Training Neural Network model...")
 
@@ -203,10 +175,11 @@ def model_training(data_splits, target_column='price'):
             restore_best_weights=True
         )
 
-        # Build neural network model - FIX: Using tf.keras instead of the 'models' variable
+        # Build neural network model
         input_shape = X_train_scaled.shape[1]
         nn_model = tf.keras.Sequential([
-            layers.Dense(32, activation='relu', kernel_regularizer=l2(0.001), input_shape=(input_shape,)),
+            layers.Input(shape=(input_shape,)),
+            layers.Dense(32, activation='relu', kernel_regularizer=l2(0.001)),
             layers.BatchNormalization(),
             layers.Dropout(0.2),
             layers.Dense(16, activation='relu', kernel_regularizer=l2(0.001)),
@@ -237,39 +210,34 @@ def model_training(data_splits, target_column='price'):
         nn_val_rmse = np.sqrt(nn_val_mse)
         nn_val_r2 = r2_score(y_val, nn_val_pred)
 
-        # Log metrics
-        try:
-            mlflow.log_metric("val_mse", nn_val_mse)
-            mlflow.log_metric("val_rmse", nn_val_rmse)
-            mlflow.log_metric("val_r2", nn_val_r2)
-            mlflow.log_param("nn_epochs", len(history.history['loss']))
-        except:
-            pass
-
         print(f"Neural Network - Validation RMSE: {nn_val_rmse:.2f}, R²: {nn_val_r2:.2f}")
 
         # Store model and metrics
         model_results['neural_network'] = {
             'model': nn_model,
-            'scaler': scaler,  # We need to keep the scaler for prediction
+            'scaler': scaler,
             'val_rmse': nn_val_rmse,
             'val_r2': nn_val_r2,
             'history': history.history
         }
 
-    # Find best model based on validation R²
-    best_model_name = max(model_results, key=lambda x: model_results[x]['val_r2'])
+    # Find best model based on cross-validation R² for tree models, validation R² for neural network
+    tree_models = ['decision_tree', 'random_forest', 'gradient_boosting']
+    best_tree_model = max(tree_models, key=lambda x: model_results[x]['cv_r2'])
+
+    # Compare best tree model with neural network
+    if model_results[best_tree_model]['cv_r2'] > model_results['neural_network']['val_r2']:
+        best_model_name = best_tree_model
+    else:
+        best_model_name = 'neural_network'
+
     best_model = model_results[best_model_name]
 
-    print(f"\nBest model: {best_model_name} with validation R²: {best_model['val_r2']:.4f}")
-
-    # Log best model
-    try:
-        mlflow.log_param("best_model", best_model_name)
-        mlflow.log_metric("best_val_rmse", best_model['val_rmse'])
-        mlflow.log_metric("best_val_r2", best_model['val_r2'])
-    except:
-        pass
+    print(f"\nBest model: {best_model_name}")
+    if best_model_name in tree_models:
+        print(f"CV R²: {best_model['cv_r2']:.4f} ± {best_model['cv_r2_std']:.4f}")
+    else:
+        print(f"Validation R²: {best_model['val_r2']:.4f}")
 
     # Return trained models and training info
     return {

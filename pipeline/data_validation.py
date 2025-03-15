@@ -6,113 +6,91 @@ import mlflow
 
 
 def data_validation(df):
-    """
-    Validate the dataset by checking for missing values, data types, and distributions
-    """
-    print("Starting data validation...")
-
-    # Check if DataFrame is None or empty
+    """Validate dataset: check missing values, data types, and distributions"""
     if df is None or len(df) == 0:
         print("Error: DataFrame is empty or None")
         return False, {"error": "Empty DataFrame"}, None
 
-    # Create a validation results dictionary
-    validation_results = {}
+    results = {}
 
-    # 1. Check required columns
-    required_columns = ['price', 'product_id', 'order_id', 'product_category_name_english',
-                        'product_weight_g', 'product_length_cm', 'product_height_cm',
-                        'product_width_cm', 'customer_state', 'seller_state']
+    # Check required columns
+    req_cols = ['price', 'product_id', 'order_id', 'product_category_name_english',
+                'product_weight_g', 'product_length_cm', 'product_height_cm',
+                'product_width_cm', 'customer_state', 'seller_state']
 
-    missing_columns = [col for col in required_columns if col not in df.columns]
+    missing_cols = [col for col in req_cols if col not in df.columns]
+    if missing_cols:
+        print(f"Warning: Missing columns: {missing_cols}")
+        results['missing_columns'] = missing_cols
 
-    if missing_columns:
-        print(f"Warning: Missing required columns: {missing_columns}")
-        validation_results['missing_columns'] = missing_columns
-
-    # 2. Check for missing values in key columns
-    if 'price' not in missing_columns:
-        price_nulls = df['price'].isnull().sum()
-        if price_nulls > 0:
-            print(f"Warning: {price_nulls} missing price values")
-            validation_results['price_nulls'] = int(price_nulls)
-
-    # Check categorical columns for nulls
-    categorical_cols = ['product_category_name_english', 'customer_state', 'seller_state',
-                        'payment_type']
-    categorical_nulls = {}
-
-    for col in categorical_cols:
-        if col in df.columns:
-            nulls = df[col].isnull().sum()
-            if nulls > 0:
-                categorical_nulls[col] = int(nulls)
-
-    if categorical_nulls:
-        print(f"Warning: Missing values in categorical columns: {categorical_nulls}")
-        validation_results['categorical_nulls'] = categorical_nulls
-
-    # 3. Check for duplicated products and orders
-    duplicate_products = df.duplicated(['product_id', 'order_id']).sum()
-    if duplicate_products > 0:
-        print(f"Warning: {duplicate_products} duplicated product-order combinations")
-        validation_results['duplicate_products'] = int(duplicate_products)
-
-    # 4. Check data types
-    if 'price' in df.columns and not pd.api.types.is_numeric_dtype(df['price']):
-        print("Warning: Price column is not numeric")
-        validation_results['price_type_error'] = True
-
-    # 5. Check for outliers in price
+    # Check price-related issues
     if 'price' in df.columns:
-        q1 = df['price'].quantile(0.25)
-        q3 = df['price'].quantile(0.75)
+        # Price nulls
+        if (price_nulls := df['price'].isnull().sum()) > 0:
+            print(f"Warning: {price_nulls} missing price values")
+            results['price_nulls'] = int(price_nulls)
+
+        # Price data type
+        if not pd.api.types.is_numeric_dtype(df['price']):
+            print("Warning: Price column is not numeric")
+            results['price_type_error'] = True
+
+        # Price outliers
+        q1, q3 = df['price'].quantile([0.25, 0.75])
         iqr = q3 - q1
-        upper_bound = q3 + 1.5 * iqr
-        price_outliers = (df['price'] > upper_bound).sum()
+        upper = q3 + 1.5 * iqr
+        if (outliers := (df['price'] > upper).sum()) > 0:
+            print(f"Warning: {outliers} price outliers detected")
+            results['price_outliers'] = int(outliers)
+            results['price_upper_bound'] = float(upper)
 
-        if price_outliers > 0:
-            print(f"Warning: {price_outliers} price outliers detected")
-            validation_results['price_outliers'] = int(price_outliers)
-            validation_results['price_upper_bound'] = float(upper_bound)
+    # Check categorical nulls
+    cat_cols = ['product_category_name_english', 'customer_state', 'seller_state', 'payment_type']
+    cat_nulls = {col: int(df[col].isnull().sum()) for col in cat_cols
+                 if col in df.columns and df[col].isnull().sum() > 0}
+    if cat_nulls:
+        print(f"Warning: Missing values in categorical columns: {cat_nulls}")
+        results['categorical_nulls'] = cat_nulls
 
-    # 6. Create visualizations
+    # Check duplicates
+    if (dupes := df.duplicated(['product_id', 'order_id']).sum()) > 0:
+        print(f"Warning: {dupes} duplicated product-order combinations")
+        results['duplicate_products'] = int(dupes)
+
+    # Helper function for visualization
+    def save_plot(path):
+        try:
+            plt.savefig(path)
+            try:
+                mlflow.log_artifact(path)
+            except:
+                pass
+            os.remove(path)
+        except Exception as e:
+            results.setdefault('viz_errors', []).append(str(e))
+        finally:
+            plt.close()
+
+    # Create visualizations
     try:
         # Price distribution
-        plt.figure(figsize=(10, 6))
-        sns.histplot(df['price'].clip(upper=df['price'].quantile(0.95)), bins=50)
-        plt.title('Price Distribution (95th percentile)')
-        plt.xlabel('Price')
-        plt.tight_layout()
-
-        # Save figure for MLflow
-        price_dist_path = "price_distribution.png"
-        plt.savefig(price_dist_path)
-        try:
-            mlflow.log_artifact(price_dist_path)
-        except:
-            pass
-        os.remove(price_dist_path)
-        plt.close()
+        if 'price' in df.columns:
+            plt.figure(figsize=(10, 6))
+            sns.histplot(df['price'].clip(upper=df['price'].quantile(0.95)), bins=50)
+            plt.title('Price Distribution (95th percentile)')
+            plt.xlabel('Price')
+            plt.tight_layout()
+            save_plot("price_distribution.png")
 
         # Category distribution
         if 'product_category_name_english' in df.columns:
             plt.figure(figsize=(12, 8))
-            top_categories = df['product_category_name_english'].value_counts().head(15)
-            sns.barplot(y=top_categories.index, x=top_categories.values)
+            top_cats = df['product_category_name_english'].value_counts().head(15)
+            sns.barplot(y=top_cats.index, x=top_cats.values)
             plt.title('Top 15 Product Categories')
             plt.xlabel('Count')
             plt.tight_layout()
-
-            # Save figure for MLflow
-            category_dist_path = "category_distribution.png"
-            plt.savefig(category_dist_path)
-            try:
-                mlflow.log_artifact(category_dist_path)
-            except:
-                pass
-            os.remove(category_dist_path)
-            plt.close()
+            save_plot("category_distribution.png")
 
         # State distribution
         if 'customer_state' in df.columns:
@@ -122,42 +100,23 @@ def data_validation(df):
             plt.title('Top 10 Customer States')
             plt.ylabel('Count')
             plt.tight_layout()
-
-            # Save figure for MLflow
-            state_dist_path = "state_distribution.png"
-            plt.savefig(state_dist_path)
-            try:
-                mlflow.log_artifact(state_dist_path)
-            except:
-                pass
-            os.remove(state_dist_path)
-            plt.close()
+            save_plot("state_distribution.png")
 
         # Freight vs. Price scatter
         if all(col in df.columns for col in ['freight_value', 'price']):
             plt.figure(figsize=(10, 6))
-            df_sample = df.sample(min(5000, len(df)))
-            plt.scatter(df_sample['freight_value'], df_sample['price'], alpha=0.5)
+            sample = df.sample(min(5000, len(df)))
+            plt.scatter(sample['freight_value'], sample['price'], alpha=0.5)
             plt.title('Price vs. Freight Value')
-            plt.xlabel('Freight Value')
+            plt.xlabel('Freight Value');
             plt.ylabel('Price')
             plt.tight_layout()
-
-            # Save figure for MLflow
-            freight_price_path = "freight_vs_price.png"
-            plt.savefig(freight_price_path)
-            try:
-                mlflow.log_artifact(freight_price_path)
-            except:
-                pass
-            os.remove(freight_price_path)
-            plt.close()
-
+            save_plot("freight_vs_price.png")
     except Exception as e:
-        print(f"Warning: Error creating visualizations: {e}")
-        validation_results['visualization_error'] = str(e)
+        print(f"Warning: Visualization error: {e}")
+        results['viz_error'] = str(e)
 
-    # 7. Calculate basic statistics for reporting
+    # Calculate statistics
     try:
         stats = {
             'total_rows': len(df),
@@ -165,42 +124,36 @@ def data_validation(df):
             'price_median': float(df['price'].median()),
             'price_min': float(df['price'].min()),
             'price_max': float(df['price'].max()),
-            'total_product_categories': int(df['product_category_name_english'].nunique()),
-            'total_customer_states': int(df['customer_state'].nunique()),
-            'total_seller_states': int(df['seller_state'].nunique())
+            'total_categories': int(df['product_category_name_english'].nunique()),
+            'customer_states': int(df['customer_state'].nunique()),
+            'seller_states': int(df['seller_state'].nunique())
         }
 
-        validation_results['stats'] = stats
+        results['stats'] = stats
+        print(f"Dataset: {stats['total_rows']} rows | Price: ${stats['price_min']:.2f}-${stats['price_max']:.2f} "
+              f"(median: ${stats['price_median']:.2f}) | {stats['total_categories']} categories")
 
-        print(f"Dataset has {stats['total_rows']} rows")
-        print(
-            f"Price range: ${stats['price_min']:.2f} - ${stats['price_max']:.2f} (median: ${stats['price_median']:.2f})")
-        print(f"Product categories: {stats['total_product_categories']}")
-        print(f"Customer states: {stats['total_customer_states']}")
-        print(f"Seller states: {stats['total_seller_states']}")
-
-        # Log statistics to MLflow
+        # Log to MLflow
         try:
-            mlflow.log_metric("mean_price", stats['price_mean'])
-            mlflow.log_metric("median_price", stats['price_median'])
-            mlflow.log_metric("num_categories", stats['total_product_categories'])
+            mlflow.log_metrics({
+                'mean_price': stats['price_mean'],
+                'median_price': stats['price_median'],
+                'num_categories': stats['total_categories']
+            })
         except:
             pass
 
     except Exception as e:
-        print(f"Warning: Error calculating statistics: {e}")
-        validation_results['stats_error'] = str(e)
+        print(f"Warning: Statistics error: {e}")
+        results['stats_error'] = str(e)
 
-    # 8. Overall validation decision
-    validation_passed = not bool(
-        missing_columns or
-        ('price_nulls' in validation_results and validation_results['price_nulls'] > 0) or
-        ('price_type_error' in validation_results)
+    # Validation decision
+    passed = not bool(
+        missing_cols or
+        results.get('price_nulls', 0) > 0 or
+        'price_type_error' in results
     )
 
-    if validation_passed:
-        print("Data validation passed")
-    else:
-        print("Data validation failed with warnings (continuing pipeline)")
+    print(f"Data validation {'passed' if passed else 'failed with warnings (continuing pipeline)'}")
 
-    return validation_passed, validation_results, df
+    return passed, results, df
