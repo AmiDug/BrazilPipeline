@@ -57,15 +57,19 @@ def data_validation(df):
         print(f"Warning: {dupes} duplicated product-order combinations")
         results['duplicate_products'] = int(dupes)
 
+    # Create visualizations directory if it doesn't exist
+    viz_dir = "visualizations"
+    os.makedirs(viz_dir, exist_ok=True)
+
     # Helper function for visualization
-    def save_plot(path):
+    def save_plot(filename):
+        path = os.path.join(viz_dir, filename)
         try:
-            plt.savefig(path)
+            plt.savefig(path, bbox_inches='tight')
             try:
-                mlflow.log_artifact(path)
+                mlflow.log_artifact(path, "visualizations")
             except:
                 pass
-            os.remove(path)
         except Exception as e:
             results.setdefault('viz_errors', []).append(str(e))
         finally:
@@ -96,22 +100,14 @@ def data_validation(df):
         if 'customer_state' in df.columns:
             plt.figure(figsize=(12, 6))
             top_states = df['customer_state'].value_counts().head(10)
-            sns.barplot(x=top_states.index, y=top_states.values)
+
+            # Create bar chart with state codes
+            plt.bar(top_states.index, top_states.values)
             plt.title('Top 10 Customer States')
+            plt.xlabel('Customer State')
             plt.ylabel('Count')
             plt.tight_layout()
             save_plot("state_distribution.png")
-
-        # Freight vs. Price scatter
-        if all(col in df.columns for col in ['freight_value', 'price']):
-            plt.figure(figsize=(10, 6))
-            sample = df.sample(min(5000, len(df)))
-            plt.scatter(sample['freight_value'], sample['price'], alpha=0.5)
-            plt.title('Price vs. Freight Value')
-            plt.xlabel('Freight Value');
-            plt.ylabel('Price')
-            plt.tight_layout()
-            save_plot("freight_vs_price.png")
     except Exception as e:
         print(f"Warning: Visualization error: {e}")
         results['viz_error'] = str(e)

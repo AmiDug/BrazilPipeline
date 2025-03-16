@@ -1,6 +1,11 @@
 import mlflow
 import sys
 import traceback
+import os
+
+# Set XGBoost format to JSON before any imports
+os.environ['XGBOOST_MODEL_FORMAT'] = 'json'
+
 from data_ingestion import data_ingestion
 from data_validation import data_validation
 from data_transformation import data_transformation
@@ -17,7 +22,7 @@ def run_pipeline():
 
         # Enable autologging for all supported frameworks
         mlflow.sklearn.autolog()
-        mlflow.xgboost.autolog()
+        mlflow.xgboost.autolog(model_format='json')  # Use JSON format for XGBoost models
         mlflow.tensorflow.autolog()
     except Exception as e:
         print(f"Warning: MLflow setup error: {e}")
