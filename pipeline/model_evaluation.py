@@ -48,25 +48,6 @@ def model_evaluation(training_results, data_splits, target_column='price'):
     print(f"MAE: {mae:.4f}")
     print(f"MAPE: {mape:.2f}%")
 
-    # Log metrics to MLflow
-    try:
-        # Check if there's an active run before starting a new one
-        active_run = mlflow.active_run()
-        if active_run is None:
-            mlflow.start_run()
-
-        mlflow.log_metric("r2", r2)
-        mlflow.log_metric("rmse", rmse)
-        mlflow.log_metric("mae", mae)
-        mlflow.log_metric("mape", mape)
-        mlflow.log_param("model_type", best_model_name)
-
-        # Only end the run if we started it
-        if active_run is None:
-            mlflow.end_run()
-    except Exception as e:
-        print(f"Warning: MLflow issue: {e}")
-
     # Create a DataFrame with actual vs predicted values
     results_df = pd.DataFrame({
         'actual': y_test,
@@ -83,9 +64,16 @@ def model_evaluation(training_results, data_splits, target_column='price'):
         "mape": mape
     }
 
+    # Log final evaluation metrics and summary
+    mlflow.log_metric("final_r2", r2)
+    mlflow.log_metric("final_rmse", rmse)
+    mlflow.log_metric("final_mae", mae)
+    mlflow.log_metric("final_mape", mape)
+    mlflow.log_param("selected_model", best_model_name)
+
     # Return evaluation results
     return {
-        "metrics": metrics,  # Add consolidated metrics dictionary
+        "metrics": metrics,
         "results_df": results_df,
-        "best_model_name": best_model_name  # Add this for pipeline compatibility
+        "best_model_name": best_model_name
     }

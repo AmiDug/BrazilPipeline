@@ -9,16 +9,25 @@ from model_evaluation import model_evaluation
 
 
 def run_pipeline():
-    """Run the complete Olist price prediction pipeline"""
+    """Run the complete Olist price prediction pipeline with MLflow autologging"""
     # Set up MLflow tracking
     try:
         mlflow.set_tracking_uri("http://127.0.0.1:8080")
         mlflow.set_experiment("Olist-Price-Prediction-CV")
+
+        # Enable autologging for all supported frameworks
+        mlflow.sklearn.autolog()
+        mlflow.xgboost.autolog()
+        mlflow.tensorflow.autolog()
     except Exception as e:
         print(f"Warning: MLflow setup error: {e}")
 
     try:
         with mlflow.start_run() as run:
+            # Log run information
+            mlflow.set_tag("pipeline_version", "2.0")
+            mlflow.set_tag("developer", "Your Name")
+
             # Step 1: Data ingestion
             print("\n" + "=" * 50 + "\nSTEP 1: DATA INGESTION\n" + "=" * 50)
             df = data_ingestion()

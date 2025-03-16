@@ -52,7 +52,6 @@ def data_transformation(df, test_size=0.3, random_state=19):
     for col in cat_cols:
         if col in df_clean.columns:
             df_clean[col] = le.fit_transform(df_clean[col].astype(str))
-            print(f"Label encoded {col}")
 
     # 5. Drop non-modeling columns
     print("Finalizing features...")
@@ -103,13 +102,9 @@ def data_transformation(df, test_size=0.3, random_state=19):
     test_df = X_test.copy()
     test_df['price'] = y_test
 
-    # Log parameters
-    try:
-        mlflow.log_param("num_features", len(feature_cols))
-        mlflow.log_param("train_size", len(train_df))
-        mlflow.log_param("test_size", len(test_df))
-    except:
-        print("Warning: Could not log to MLflow")
+    # Log custom information that autologging won't capture
+    mlflow.log_param("feature_engineering", "Label encoding + volume calculation")
+    mlflow.log_param("outlier_handling", "Capped at 99.5% + remove price outliers")
 
     print(f"Split data: {len(train_df)} training samples, {len(test_df)} test samples")
 
