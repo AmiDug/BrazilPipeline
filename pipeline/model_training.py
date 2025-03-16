@@ -1,6 +1,5 @@
 import os
 import tempfile
-from pathlib import Path
 import warnings
 
 # Set environment variables before any other imports
@@ -10,11 +9,8 @@ os.environ['XGBOOST_MODEL_FORMAT'] = 'json'  # Force JSON format for XGBoost mod
 
 # Set matplotlib to use a non-GUI backend BEFORE any other imports
 import matplotlib
-
 matplotlib.use('Agg')  # Force non-interactive backend
 import matplotlib.pyplot as plt
-import seaborn as sns
-
 import pandas as pd
 import numpy as np
 import tensorflow as tf
@@ -28,7 +24,6 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 from sklearn.model_selection import KFold, cross_val_score
 import mlflow
-import re
 
 # Check XGBoost version for MLflow compatibility
 xgb_version = xgb.__version__
@@ -102,28 +97,6 @@ def create_error_by_price_range_plot(y_test, y_pred, save_path=None):
         return save_path
     else:
         plt.tight_layout()
-        plt.show()
-        plt.close()
-
-
-def create_feature_importance_plot(feature_importance_df, save_path=None):
-    """Create a horizontal bar chart of feature importances."""
-    # Sort by importance and take top 15
-    df = feature_importance_df.sort_values('importance', ascending=False).head(15)
-
-    plt.figure(figsize=(12, 8))
-    plt.barh(df['feature'], df['importance'])
-    plt.title('Top 15 Feature Importances')
-    plt.xlabel('Importance')
-    plt.grid(axis='x', alpha=0.3)
-    plt.tight_layout()
-
-    # Save or show the plot
-    if save_path:
-        plt.savefig(save_path, bbox_inches='tight')
-        plt.close()
-        return save_path
-    else:
         plt.show()
         plt.close()
 
@@ -729,45 +702,6 @@ def model_training(data_splits, target_column='price'):
         print(f"\nTop 10 Important Features ({best_model_name}):")
         print(model_results[best_model_name]['feature_importance'].head(10))
 
-    # Create category distribution visualization
-    if 'product_category_name_english' in train_df.columns:
-        plt.figure(figsize=(12, 8))
-        cat_counts = train_df['product_category_name_english'].value_counts().head(15)
-        plt.title('Top 15 Product Categories')
-        sns.barplot(y=cat_counts.index, x=cat_counts.values)
-        plt.xlabel('Count')
-        plt.tight_layout()
-        category_dist_path = os.path.join(visualizations_dir, 'category_distribution.png')
-        plt.savefig(category_dist_path, bbox_inches='tight')
-        plt.close()
-        mlflow.log_artifact(category_dist_path, "visualizations")
-
-    # Create price distribution visualization
-    plt.figure(figsize=(10, 6))
-    sns.histplot(train_df['price'].clip(upper=train_df['price'].quantile(0.95)), bins=50)
-    plt.title('Price Distribution (95th percentile)')
-    plt.xlabel('Price')
-    plt.tight_layout()
-    price_dist_path = os.path.join(visualizations_dir, 'price_distribution.png')
-    plt.savefig(price_dist_path, bbox_inches='tight')
-    plt.close()
-    mlflow.log_artifact(price_dist_path, "visualizations")
-
-    # Create state distribution visualization
-    if 'customer_state' in train_df.columns:
-        plt.figure(figsize=(12, 6))
-        state_counts = train_df['customer_state'].value_counts().head(10)
-        plt.title('Top 10 Customer States')
-        plt.xlabel('Customer State')
-        plt.ylabel('Count')
-        plt.xticks(rotation=0)
-        plt.bar(state_counts.index, state_counts.values)
-        plt.tight_layout()
-        state_dist_path = os.path.join(visualizations_dir, 'state_distribution.png')
-        plt.savefig(state_dist_path, bbox_inches='tight')
-        plt.close()
-        mlflow.log_artifact(state_dist_path, "visualizations")
-
     # Create summary model comparison visualization
     plt.figure(figsize=(12, 6))
     models = summary_df['Model']
@@ -788,18 +722,6 @@ def model_training(data_splits, target_column='price'):
     plt.savefig(summary_path, bbox_inches='tight')
     plt.close()
     mlflow.log_artifact(summary_path, "visualizations")
-
-    # Create a feature importance weight visualization
-    if 'feature_importance' in model_results[best_model_name]:
-        fi_df = model_results[best_model_name]['feature_importance'].head(20)
-        fi_path = os.path.join(visualizations_dir, 'feature_importance_weight.png')
-        create_feature_importance_plot(fi_df, fi_path)
-        mlflow.log_artifact(fi_path, "visualizations")
-
-        # Save feature importance as JSON as well
-        fi_json_path = os.path.join(artifacts_dir, 'feature_importance_weight.json')
-        fi_df.to_json(fi_json_path, orient='records', indent=2)
-        mlflow.log_artifact(fi_json_path, "artifacts")
 
     # Log summary table as CSV
     summary_csv_path = os.path.join(artifacts_dir, 'model_summary.csv')
