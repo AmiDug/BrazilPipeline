@@ -1,5 +1,6 @@
 import os
 import tempfile
+from pathlib import Path
 import warnings
 
 # Set environment variables before any other imports
@@ -9,8 +10,11 @@ os.environ['XGBOOST_MODEL_FORMAT'] = 'json'  # Force JSON format for XGBoost mod
 
 # Set matplotlib to use a non-GUI backend BEFORE any other imports
 import matplotlib
+
 matplotlib.use('Agg')  # Force non-interactive backend
 import matplotlib.pyplot as plt
+import seaborn as sns
+
 import pandas as pd
 import numpy as np
 import tensorflow as tf
@@ -24,6 +28,7 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 from sklearn.model_selection import KFold, cross_val_score
 import mlflow
+import re
 
 # Check XGBoost version for MLflow compatibility
 xgb_version = xgb.__version__
@@ -97,6 +102,28 @@ def create_error_by_price_range_plot(y_test, y_pred, save_path=None):
         return save_path
     else:
         plt.tight_layout()
+        plt.show()
+        plt.close()
+
+
+def create_feature_importance_plot(feature_importance_df, save_path=None):
+    """Create a horizontal bar chart of feature importances."""
+    # Sort by importance and take top 15
+    df = feature_importance_df.sort_values('importance', ascending=False).head(15)
+
+    plt.figure(figsize=(12, 8))
+    plt.barh(df['feature'], df['importance'])
+    plt.title('Top 15 Feature Importances')
+    plt.xlabel('Importance')
+    plt.grid(axis='x', alpha=0.3)
+    plt.tight_layout()
+
+    # Save or show the plot
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight')
+        plt.close()
+        return save_path
+    else:
         plt.show()
         plt.close()
 
@@ -185,7 +212,6 @@ def model_training(data_splits, target_column='price'):
     All models report R², RMSE, MAE, MSE, and MAPE metrics.
     """
     print("Starting model training with GPU acceleration for XGBoost and Neural Network...")
-
     # Set random seeds for reproducibility
     np.random.seed(42)
     tf.random.set_seed(42)

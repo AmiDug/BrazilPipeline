@@ -21,7 +21,7 @@ def run_pipeline():
         mlflow.set_experiment("Olist-Price-Prediction-CV")
 
         # Enable autologging for all supported frameworks
-        mlflow.sklearn.autolog()
+        mlflow.sklearn.autolog(log_feature_importance=False)
         mlflow.xgboost.autolog(model_format='json')  # Use JSON format for XGBoost models
         mlflow.tensorflow.autolog()
     except Exception as e:
