@@ -1,6 +1,5 @@
 import os
 import tempfile
-from pathlib import Path
 import warnings
 
 # Set environment variables before any other imports
@@ -13,8 +12,6 @@ import matplotlib
 
 matplotlib.use('Agg')  # Force non-interactive backend
 import matplotlib.pyplot as plt
-import seaborn as sns
-
 import pandas as pd
 import numpy as np
 import tensorflow as tf
@@ -28,174 +25,194 @@ from sklearn.ensemble import RandomForestRegressor
 from sklearn.metrics import r2_score, mean_squared_error, mean_absolute_error
 from sklearn.model_selection import KFold, cross_val_score
 import mlflow
-import re
 
-# Check XGBoost version for MLflow compatibility
-xgb_version = xgb.__version__
-if xgb_version > "2.1.3":
-    warnings.warn(f"XGBoost version {xgb_version} is newer than the latest version tested with MLflow (2.1.3). "
-                  f"Some autologging features may not work correctly. If you encounter issues, "
-                  f"consider downgrading XGBoost to version 2.1.3.")
+def create_plot(plot_function, args, kwargs, save_path=None):
+    """
+    Generic plotting function to reduce code duplication
 
-# Configure TensorFlow to use GPU memory growth to avoid OOM errors
-gpus = tf.config.experimental.list_physical_devices('GPU')
-if gpus:
-    try:
-        for gpu in gpus:
-            tf.config.experimental.set_memory_growth(gpu, True)
-        print(f"GPU memory growth enabled for {len(gpus)} GPUs")
-        print(f"Using GPU: {tf.config.list_physical_devices('GPU')}")
-    except RuntimeError as e:
-        print(f"GPU configuration error: {e}")
+    Parameters:
+    plot_function (callable): Function that creates the actual plot
+    args (tuple): Positional arguments for plot_function
+    kwargs (dict): Keyword arguments for plot_function
+    save_path (str, optional): Path to save the figure
+
+    Returns:
+    str or None: Path to saved figure or None if displayed
+    """
+    # Create plot using provided function
+    plot_function(*args, **kwargs)
+
+    # Save or display
+    if save_path:
+        plt.savefig(save_path, bbox_inches='tight')
+        plt.close()
+        return save_path
+    else:
+        plt.tight_layout()
+        plt.show()
+        plt.close()
+        return None
 
 
 def create_error_by_price_range_plot(y_test, y_pred, save_path=None):
     """Create a bar chart showing prediction error by price range."""
-    # Convert to numpy arrays if they're not already
-    y_test = np.array(y_test)
-    y_pred = np.array(y_pred)
 
-    # Calculate absolute percentage error
-    ape = np.abs((y_test - y_pred) / y_test) * 100
+    def plot_function(y_test, y_pred):
+        # Convert to numpy arrays if they're not already
+        y_test = np.array(y_test)
+        y_pred = np.array(y_pred)
 
-    # Create price range bins
-    bins = [0, 50, 100, 200, 500, 1000, float('inf')]
-    bin_labels = ['0-50', '50-100', '100-200', '200-500', '500-1000', '1000+']
+        # Calculate absolute percentage error
+        ape = np.abs((y_test - y_pred) / y_test) * 100
 
-    # Assign each sample to a bin
-    bin_indices = np.digitize(y_test, bins) - 1
-    bin_indices = np.clip(bin_indices, 0, len(bin_labels) - 1)
+        # Create price range bins
+        bins = [0, 50, 100, 200, 500, 1000, float('inf')]
+        bin_labels = ['0-50', '50-100', '100-200', '200-500', '500-1000', '1000+']
 
-    # Calculate mean APE for each bin
-    mean_ape_by_bin = []
-    counts_by_bin = []
+        # Assign each sample to a bin
+        bin_indices = np.digitize(y_test, bins) - 1
+        bin_indices = np.clip(bin_indices, 0, len(bin_labels) - 1)
 
-    for i in range(len(bin_labels)):
-        mask = (bin_indices == i)
-        bin_ape = ape[mask]
-        if len(bin_ape) > 0:
-            mean_ape_by_bin.append(np.mean(bin_ape))
-            counts_by_bin.append(np.sum(mask))
-        else:
-            mean_ape_by_bin.append(0)
-            counts_by_bin.append(0)
+        # Calculate mean APE for each bin
+        mean_ape_by_bin = []
+        counts_by_bin = []
 
-    # Create plot
-    plt.figure(figsize=(12, 6))
-    bars = plt.bar(bin_labels, mean_ape_by_bin)
+        for i in range(len(bin_labels)):
+            mask = (bin_indices == i)
+            bin_ape = ape[mask]
+            if len(bin_ape) > 0:
+                mean_ape_by_bin.append(np.mean(bin_ape))
+                counts_by_bin.append(np.sum(mask))
+            else:
+                mean_ape_by_bin.append(0)
+                counts_by_bin.append(0)
 
-    # Add count annotations
-    for i, bar in enumerate(bars):
-        plt.text(bar.get_x() + bar.get_width() / 2, 5,
-                 f'n={counts_by_bin[i]}',
-                 ha='center', va='bottom')
+        # Create plot
+        plt.figure(figsize=(12, 6))
+        bars = plt.bar(bin_labels, mean_ape_by_bin)
 
-    plt.title('Error by Price Range')
-    plt.xlabel('Price Range')
-    plt.ylabel('Mean Absolute Percentage Error (%)')
-    plt.grid(axis='y', alpha=0.3)
+        # Add count annotations
+        for i, bar in enumerate(bars):
+            plt.text(bar.get_x() + bar.get_width() / 2, 5,
+                     f'n={counts_by_bin[i]}',
+                     ha='center', va='bottom')
 
-    # Save or show the plot
-    if save_path:
-        plt.savefig(save_path, bbox_inches='tight')
-        plt.close()
-        return save_path
-    else:
-        plt.tight_layout()
-        plt.show()
-        plt.close()
+        plt.title('Error by Price Range')
+        plt.xlabel('Price Range')
+        plt.ylabel('Mean Absolute Percentage Error (%)')
+        plt.grid(axis='y', alpha=0.3)
+
+    return create_plot(plot_function, (y_test, y_pred), {}, save_path)
 
 
 def create_feature_importance_plot(feature_importance_df, save_path=None):
     """Create a horizontal bar chart of feature importances."""
-    # Sort by importance and take top 15
-    df = feature_importance_df.sort_values('importance', ascending=False).head(15)
 
-    plt.figure(figsize=(12, 8))
-    plt.barh(df['feature'], df['importance'])
-    plt.title('Top 15 Feature Importances')
-    plt.xlabel('Importance')
-    plt.grid(axis='x', alpha=0.3)
-    plt.tight_layout()
+    def plot_function(df):
+        # Sort by importance and take top 15
+        df = df.sort_values('importance', ascending=False).head(15)
 
-    # Save or show the plot
-    if save_path:
-        plt.savefig(save_path, bbox_inches='tight')
-        plt.close()
-        return save_path
-    else:
-        plt.show()
-        plt.close()
+        plt.figure(figsize=(12, 8))
+        plt.barh(df['feature'], df['importance'])
+        plt.title('Top 15 Feature Importances')
+        plt.xlabel('Importance')
+        plt.grid(axis='x', alpha=0.3)
+
+    return create_plot(plot_function, (feature_importance_df,), {}, save_path)
 
 
 def create_predicted_vs_actual_plot(y_test, y_pred, model_name, metrics, save_path=None):
     """Create a scatter plot of predicted vs actual values."""
-    plt.figure(figsize=(10, 8))
-    plt.scatter(y_test, y_pred, alpha=0.5, s=5)
 
-    # Add diagonal line (perfect predictions)
-    max_val = max(np.max(y_test), np.max(y_pred))
-    plt.plot([0, max_val], [0, max_val], 'r--')
+    def plot_function(y_test, y_pred, model_name, metrics):
+        plt.figure(figsize=(10, 8))
+        plt.scatter(y_test, y_pred, alpha=0.5, s=5)
 
-    # Add metrics to plot
-    metrics_text = f"RMSE: {metrics['test_rmse']:.2f}\nR²: {metrics['test_r2']:.4f}\nMAPE: {metrics['test_mape']:.2f}%"
-    plt.text(0.05, 0.95, metrics_text, transform=plt.gca().transAxes,
-             bbox=dict(facecolor='white', alpha=0.8))
+        # Add diagonal line (perfect predictions)
+        max_val = max(np.max(y_test), np.max(y_pred))
+        plt.plot([0, max_val], [0, max_val], 'r--')
 
-    plt.title(f'{model_name} - Predicted vs Actual')
-    plt.xlabel('Actual Price')
-    plt.ylabel('Predicted Price')
-    plt.grid(alpha=0.3)
+        # Add metrics to plot
+        metrics_text = f"RMSE: {metrics['test_rmse']:.2f}\nR²: {metrics['test_r2']:.4f}\nMAPE: {metrics['test_mape']:.2f}%"
+        plt.text(0.05, 0.95, metrics_text, transform=plt.gca().transAxes,
+                 bbox=dict(facecolor='white', alpha=0.8))
 
-    # Save or show the plot
-    if save_path:
-        plt.savefig(save_path, bbox_inches='tight')
-        plt.close()
-        return save_path
-    else:
-        plt.tight_layout()
-        plt.show()
-        plt.close()
+        plt.title(f'{model_name} - Predicted vs Actual')
+        plt.xlabel('Actual Price')
+        plt.ylabel('Predicted Price')
+        plt.grid(alpha=0.3)
+
+    return create_plot(plot_function, (y_test, y_pred, model_name, metrics), {}, save_path)
 
 
 def create_customer_states_plot(df, save_path=None):
     """Create a bar chart of top 10 customer states."""
-    # Count states
-    state_counts = df['customer_state'].value_counts().head(10)
 
-    # Create a mapping from state codes to proper state names (if available)
-    state_names = {
-        'SP': 'São Paulo',
-        'RJ': 'Rio de Janeiro',
-        'MG': 'Minas Gerais',
-        'RS': 'Rio Grande do Sul',
-        'PR': 'Paraná',
-        'SC': 'Santa Catarina',
-        'BA': 'Bahia',
-        'DF': 'Distrito Federal',
-        'GO': 'Goiás',
-        'ES': 'Espírito Santo'
+    def plot_function(df):
+        # Count states
+        state_counts = df['customer_state'].value_counts().head(10)
+
+        # Create a mapping from state codes to proper state names (if available)
+        state_names = {
+            'SP': 'São Paulo', 'RJ': 'Rio de Janeiro', 'MG': 'Minas Gerais',
+            'RS': 'Rio Grande do Sul', 'PR': 'Paraná', 'SC': 'Santa Catarina',
+            'BA': 'Bahia', 'DF': 'Distrito Federal', 'GO': 'Goiás',
+            'ES': 'Espírito Santo'
+        }
+
+        plt.figure(figsize=(12, 6))
+        plt.bar(state_counts.index, state_counts.values)
+        plt.title('Top 10 Customer States')
+        plt.xlabel('Customer State')
+        plt.ylabel('Count')
+        plt.grid(axis='y', alpha=0.3)
+
+    return create_plot(plot_function, (df,), {}, save_path)
+
+
+def evaluate_model(y_true, y_pred):
+    """
+    Calculate common regression metrics for model evaluation
+
+    Parameters:
+    y_true (array-like): True target values
+    y_pred (array-like): Predicted target values
+
+    Returns:
+    dict: Dictionary containing evaluation metrics
+    """
+    metrics = {
+        'r2': r2_score(y_true, y_pred),
+        'mse': mean_squared_error(y_true, y_pred),
+        'rmse': np.sqrt(mean_squared_error(y_true, y_pred)),
+        'mae': mean_absolute_error(y_true, y_pred),
+        'mape': np.mean(np.abs((y_true - y_pred) / y_true)) * 100
     }
+    return metrics
 
-    # Use state names for the plot if available, otherwise use codes
-    plt.figure(figsize=(12, 6))
 
-    # Use state codes for display but with a cleaner presentation
-    plt.bar(state_counts.index, state_counts.values)
-    plt.title('Top 10 Customer States')
-    plt.xlabel('Customer State')
-    plt.ylabel('Count')
-    plt.grid(axis='y', alpha=0.3)
-    plt.tight_layout()
+def log_visualizations(paths, artifact_dir="visualizations"):
+    """Log multiple visualization artifacts to MLflow"""
+    for path in paths:
+        if path:
+            mlflow.log_artifact(path, artifact_dir)
 
-    # Save or show the plot
-    if save_path:
-        plt.savefig(save_path, bbox_inches='tight')
-        plt.close()
-        return save_path
-    else:
-        plt.show()
-        plt.close()
+
+def create_wrapper_predict_fn(model, scaler=None, is_xgboost=False):
+    """Create a standardized prediction function"""
+
+    def predict_fn(X_df):
+        if is_xgboost:
+            if not isinstance(X_df, xgb.DMatrix):
+                X_df = xgb.DMatrix(data=X_df)
+            return model.predict(X_df)
+        elif scaler is not None:
+            X_scaled = scaler.transform(X_df)
+            return model.predict(X_scaled, verbose=0).flatten()
+        else:
+            return model.predict(X_df)
+
+    return predict_fn
 
 
 def model_training(data_splits, target_column='price'):
@@ -244,8 +261,6 @@ def model_training(data_splits, target_column='price'):
 
     # Create a temporary directory for visualizations
     artifacts_dir = tempfile.mkdtemp()
-
-    # Create a dedicated visualizations directory
     visualizations_dir = os.path.join(artifacts_dir, "visualizations")
     os.makedirs(visualizations_dir, exist_ok=True)
 
@@ -287,32 +302,24 @@ def model_training(data_splits, target_column='price'):
 
     # Test set performance
     dt_pred = dt_model.predict(X_test)
-    dt_test_r2 = r2_score(y_test, dt_pred)
-    dt_test_mse = mean_squared_error(y_test, dt_pred)
-    dt_test_rmse = np.sqrt(dt_test_mse)
-    dt_test_mae = mean_absolute_error(y_test, dt_pred)
-    dt_test_mape = np.mean(np.abs((y_test - dt_pred) / y_test)) * 100
+    dt_metrics = evaluate_model(y_test, dt_pred)
 
-    print(
-        f"Decision Tree - Test R²: {dt_test_r2:.4f}, RMSE: {dt_test_rmse:.2f}, MAE: {dt_test_mae:.2f}, MSE: {dt_test_mse:.2f}, MAPE: {dt_test_mape:.2f}%")
+    print(f"Decision Tree - Test R²: {dt_metrics['r2']:.4f}, RMSE: {dt_metrics['rmse']:.2f}, "
+          f"MAE: {dt_metrics['mae']:.2f}, MSE: {dt_metrics['mse']:.2f}, MAPE: {dt_metrics['mape']:.2f}%")
 
-    # Create a prediction function for compatibility
-    def dt_predict_fn(X_df):
-        """Prediction function that handles DataFrame input for Decision Tree models"""
-        return dt_model.predict(X_df)
-
+    # Store results
     model_results['decision_tree'] = {
         'model': dt_model,
         'cv_r2': dt_cv_mean,
         'cv_r2_std': dt_cv_std,
-        'test_r2': dt_test_r2,
-        'test_rmse': dt_test_rmse,
-        'test_mae': dt_test_mae,
-        'test_mse': dt_test_mse,
-        'test_mape': dt_test_mape,
+        'test_r2': dt_metrics['r2'],
+        'test_rmse': dt_metrics['rmse'],
+        'test_mae': dt_metrics['mae'],
+        'test_mse': dt_metrics['mse'],
+        'test_mape': dt_metrics['mape'],
         'feature_importance': dt_importance,
         'predictions': dt_pred,
-        'predict_fn': dt_predict_fn
+        'predict_fn': create_wrapper_predict_fn(dt_model)
     }
 
     # Create visualizations - save to visualizations directory
@@ -323,9 +330,8 @@ def model_training(data_splits, target_column='price'):
     dt_feature_imp_path = os.path.join(visualizations_dir, 'dt_feature_importance.png')
     create_feature_importance_plot(dt_importance, dt_feature_imp_path)
 
-    # Only log visualizations (not handled by autologging)
-    mlflow.log_artifact(dt_pred_vs_actual_path, "visualizations")
-    mlflow.log_artifact(dt_feature_imp_path, "visualizations")
+    # Log visualizations
+    log_visualizations([dt_pred_vs_actual_path, dt_feature_imp_path])
 
     # ----------------------------------------------------
     # 2. Random Forest
@@ -363,32 +369,24 @@ def model_training(data_splits, target_column='price'):
 
     # Test set performance
     rf_pred = rf_model.predict(X_test)
-    rf_test_r2 = r2_score(y_test, rf_pred)
-    rf_test_mse = mean_squared_error(y_test, rf_pred)
-    rf_test_rmse = np.sqrt(rf_test_mse)
-    rf_test_mae = mean_absolute_error(y_test, rf_pred)
-    rf_test_mape = np.mean(np.abs((y_test - rf_pred) / y_test)) * 100
+    rf_metrics = evaluate_model(y_test, rf_pred)
 
-    print(
-        f"Random Forest - Test R²: {rf_test_r2:.4f}, RMSE: {rf_test_rmse:.2f}, MAE: {rf_test_mae:.2f}, MSE: {rf_test_mse:.2f}, MAPE: {rf_test_mape:.2f}%")
+    print(f"Random Forest - Test R²: {rf_metrics['r2']:.4f}, RMSE: {rf_metrics['rmse']:.2f}, "
+          f"MAE: {rf_metrics['mae']:.2f}, MSE: {rf_metrics['mse']:.2f}, MAPE: {rf_metrics['mape']:.2f}%")
 
-    # Create a prediction function for compatibility
-    def rf_predict_fn(X_df):
-        """Prediction function that handles DataFrame input for Random Forest models"""
-        return rf_model.predict(X_df)
-
+    # Store results
     model_results['random_forest'] = {
         'model': rf_model,
         'cv_r2': rf_cv_mean,
         'cv_r2_std': rf_cv_std,
-        'test_r2': rf_test_r2,
-        'test_rmse': rf_test_rmse,
-        'test_mae': rf_test_mae,
-        'test_mse': rf_test_mse,
-        'test_mape': rf_test_mape,
+        'test_r2': rf_metrics['r2'],
+        'test_rmse': rf_metrics['rmse'],
+        'test_mae': rf_metrics['mae'],
+        'test_mse': rf_metrics['mse'],
+        'test_mape': rf_metrics['mape'],
         'feature_importance': rf_importance,
         'predictions': rf_pred,
-        'predict_fn': rf_predict_fn
+        'predict_fn': create_wrapper_predict_fn(rf_model)
     }
 
     # Create and log visualizations to the visualizations directory
@@ -399,9 +397,8 @@ def model_training(data_splits, target_column='price'):
     rf_feature_imp_path = os.path.join(visualizations_dir, 'rf_feature_importance.png')
     create_feature_importance_plot(rf_importance, rf_feature_imp_path)
 
-    # Only log visualizations
-    mlflow.log_artifact(rf_pred_vs_actual_path, "visualizations")
-    mlflow.log_artifact(rf_feature_imp_path, "visualizations")
+    # Log visualizations
+    log_visualizations([rf_pred_vs_actual_path, rf_feature_imp_path])
 
     # ----------------------------------------------------
     # 3. XGBoost with enhanced GPU acceleration
@@ -456,16 +453,12 @@ def model_training(data_splits, target_column='price'):
     # Make predictions
     xgb_y_pred = xgb_model.predict(dtest)
 
-    # Calculate all metrics for XGBoost
-    xgb_test_r2 = r2_score(y_test, xgb_y_pred)
-    xgb_test_mse = mean_squared_error(y_test, xgb_y_pred)
-    xgb_test_rmse = np.sqrt(xgb_test_mse)
-    xgb_test_mae = mean_absolute_error(y_test, xgb_y_pred)
-    xgb_test_mape = np.mean(np.abs((y_test - xgb_y_pred) / y_test)) * 100
+    # Calculate metrics for XGBoost
+    xgb_metrics = evaluate_model(y_test, xgb_y_pred)
 
     # Print metrics
-    print(
-        f"XGBoost - Test R²: {xgb_test_r2:.4f}, RMSE: {xgb_test_rmse:.2f}, MAE: {xgb_test_mae:.2f}, MSE: {xgb_test_mse:.2f}, MAPE: {xgb_test_mape:.2f}%")
+    print(f"XGBoost - Test R²: {xgb_metrics['r2']:.4f}, RMSE: {xgb_metrics['rmse']:.2f}, "
+          f"MAE: {xgb_metrics['mae']:.2f}, MSE: {xgb_metrics['mse']:.2f}, MAPE: {xgb_metrics['mape']:.2f}%")
     print(f"XGBoost - Best boosting rounds: {best_round}")
 
     # Get feature importance
@@ -478,32 +471,23 @@ def model_training(data_splits, target_column='price'):
     # Calculate CV R² (not directly provided by xgb.cv)
     xgb_cv_r2 = 1 - (xgb_cv_rmse ** 2 / np.var(y_train))
 
-    # Create custom predict function for XGBoost
-    def xgb_predict_fn(X_df):
-        """Prediction function that handles DataFrame input for XGBoost"""
-        if isinstance(X_df, xgb.DMatrix):
-            X_dmatrix = X_df
-        else:
-            X_dmatrix = xgb.DMatrix(data=X_df)
-        return xgb_model.predict(X_dmatrix)
-
-    # Store results with all metrics
+    # Store results
     model_results['xgboost_gpu'] = {
         'model': xgb_model,
         'cv_rmse': xgb_cv_rmse,
         'cv_r2': xgb_cv_r2,
-        'test_r2': xgb_test_r2,
-        'test_rmse': xgb_test_rmse,
-        'test_mae': xgb_test_mae,
-        'test_mse': xgb_test_mse,
-        'test_mape': xgb_test_mape,
+        'test_r2': xgb_metrics['r2'],
+        'test_rmse': xgb_metrics['rmse'],
+        'test_mae': xgb_metrics['mae'],
+        'test_mse': xgb_metrics['mse'],
+        'test_mape': xgb_metrics['mape'],
         'best_round': best_round,
         'feature_importance': xgb_importance,
         'predictions': xgb_y_pred,
-        'predict_fn': xgb_predict_fn
+        'predict_fn': create_wrapper_predict_fn(xgb_model, is_xgboost=True)
     }
 
-    # Create and log XGBoost visualizations to the visualizations directory
+    # Create and log XGBoost visualizations
     xgb_pred_vs_actual_path = os.path.join(visualizations_dir, 'xgb_predicted_vs_actual.png')
     create_predicted_vs_actual_plot(y_test, xgb_y_pred, 'XGBoost',
                                     model_results['xgboost_gpu'], xgb_pred_vs_actual_path)
@@ -514,10 +498,8 @@ def model_training(data_splits, target_column='price'):
     xgb_error_by_price_path = os.path.join(visualizations_dir, 'xgb_error_by_price_range.png')
     create_error_by_price_range_plot(y_test, xgb_y_pred, xgb_error_by_price_path)
 
-    # Only log custom visualizations
-    mlflow.log_artifact(xgb_pred_vs_actual_path, "visualizations")
-    mlflow.log_artifact(xgb_feature_imp_path, "visualizations")
-    mlflow.log_artifact(xgb_error_by_price_path, "visualizations")
+    # Log visualizations
+    log_visualizations([xgb_pred_vs_actual_path, xgb_feature_imp_path, xgb_error_by_price_path])
 
     # ----------------------------------------------------
     # 4. Neural Network with GPU optimization for 3060 Ti
@@ -533,7 +515,7 @@ def model_training(data_splits, target_column='price'):
         # Disable TensorFlow autologging during training
         mlflow.tensorflow.autolog(disable=True)
 
-        # Manual validation split exactly as in original code
+        # Manual validation split
         val_size = int(0.2 * len(X_train))
         X_val = X_train.iloc[-val_size:].copy()
         y_val = y_train[-val_size:]
@@ -546,50 +528,39 @@ def model_training(data_splits, target_column='price'):
         X_val_scaled = scaler.transform(X_val)
         X_test_scaled = scaler.transform(X_test)
 
-        # Build a more complex model optimized for GPU
+        # Build model
         nn_model = tf.keras.Sequential([
             layers.Input(shape=(X_train_scaled.shape[1],)),
-
-            # First block - wider with more regularization
             layers.Dense(128, activation='relu', kernel_regularizer=l2(0.0005)),
             layers.BatchNormalization(),
             layers.Dropout(0.3),
-
-            # Second block
             layers.Dense(96, activation='relu', kernel_regularizer=l2(0.0005)),
             layers.BatchNormalization(),
             layers.Dropout(0.3),
-
-            # Third block
             layers.Dense(64, activation='relu', kernel_regularizer=l2(0.0005)),
             layers.BatchNormalization(),
             layers.Dropout(0.25),
-
-            # Fourth block
             layers.Dense(32, activation='relu', kernel_regularizer=l2(0.0005)),
             layers.BatchNormalization(),
             layers.Dropout(0.2),
-
-            # Output layer
             layers.Dense(1)
         ])
 
-        # Compile model with optimizer tuned for GPU training
+        # Compile model
         nn_model.compile(
             optimizer=tf.keras.optimizers.Adam(learning_rate=0.001),
             loss='mse',
             metrics=['mae']
         )
 
-        # Early stopping with more patience
+        # Callbacks
         early_stop = EarlyStopping(
             monitor='val_loss',
-            patience=15,  # Increased from 10
+            patience=15,
             restore_best_weights=True,
             verbose=1
         )
 
-        # Learning rate scheduler for better convergence
         lr_scheduler = ReduceLROnPlateau(
             monitor='val_loss',
             factor=0.5,
@@ -601,73 +572,59 @@ def model_training(data_splits, target_column='price'):
         # Set up MLflow model saving in Keras format
         class MLflowKerasCallback(tf.keras.callbacks.Callback):
             def on_train_end(self, logs=None):
-                # Save model in Keras format without deprecated save_format argument
                 keras_path = os.path.join(artifacts_dir, "keras_model.keras")
-                self.model.save(keras_path)  # Extension .keras implies the format
+                self.model.save(keras_path)
                 mlflow.log_artifact(keras_path, "model")
 
         mlflow_callback = MLflowKerasCallback()
 
-        # Train with more epochs and larger batch size for GPU efficiency
+        # Train model
         history = nn_model.fit(
             X_train_scaled, y_train_final,
             validation_data=(X_val_scaled, y_val),
-            epochs=100,  # Increased from 50
-            batch_size=256,  # Increased for GPU efficiency
+            epochs=100,
+            batch_size=256,
             callbacks=[early_stop, lr_scheduler, mlflow_callback],
             verbose=1
         )
 
-        # Re-enable TensorFlow autologging after training
+        # Re-enable TensorFlow autologging
         mlflow.tensorflow.autolog(disable=False)
 
-    # Evaluate on validation set (for comparison with original code)
+    # Evaluate on validation set
     nn_val_pred = nn_model.predict(X_val_scaled, verbose=0).flatten()
-    nn_val_mse = mean_squared_error(y_val, nn_val_pred)
-    nn_val_rmse = np.sqrt(nn_val_mse)
-    nn_val_r2 = r2_score(y_val, nn_val_pred)
-    nn_val_mae = mean_absolute_error(y_val, nn_val_pred)
-    nn_val_mape = np.mean(np.abs((y_val - nn_val_pred) / y_val)) * 100
+    nn_val_metrics = evaluate_model(y_val, nn_val_pred)
 
-    print(
-        f"Neural Network - Validation R²: {nn_val_r2:.4f}, RMSE: {nn_val_rmse:.2f}, MAE: {nn_val_mae:.2f}, MSE: {nn_val_mse:.2f}, MAPE: {nn_val_mape:.2f}%")
+    print(f"Neural Network - Validation R²: {nn_val_metrics['r2']:.4f}, RMSE: {nn_val_metrics['rmse']:.2f}, "
+          f"MAE: {nn_val_metrics['mae']:.2f}, MSE: {nn_val_metrics['mse']:.2f}, MAPE: {nn_val_metrics['mape']:.2f}%")
 
-    # Also evaluate on test set for comparison with other models
+    # Evaluate on test set
     nn_test_pred = nn_model.predict(X_test_scaled, verbose=0).flatten()
-    nn_test_r2 = r2_score(y_test, nn_test_pred)
-    nn_test_mse = mean_squared_error(y_test, nn_test_pred)
-    nn_test_rmse = np.sqrt(nn_test_mse)
-    nn_test_mae = mean_absolute_error(y_test, nn_test_pred)
-    nn_test_mape = np.mean(np.abs((y_test - nn_test_pred) / y_test)) * 100
+    nn_test_metrics = evaluate_model(y_test, nn_test_pred)
 
-    print(
-        f"Neural Network - Test R²: {nn_test_r2:.4f}, RMSE: {nn_test_rmse:.2f}, MAE: {nn_test_mae:.2f}, MSE: {nn_test_mse:.2f}, MAPE: {nn_test_mape:.2f}%")
+    print(f"Neural Network - Test R²: {nn_test_metrics['r2']:.4f}, RMSE: {nn_test_metrics['rmse']:.2f}, "
+          f"MAE: {nn_test_metrics['mae']:.2f}, MSE: {nn_test_metrics['mse']:.2f}, MAPE: {nn_test_metrics['mape']:.2f}%")
 
-    # Create a prediction function for compatibility
-    def nn_predict_fn(X_df):
-        """Prediction function that handles DataFrame input for TensorFlow model"""
-        X_scaled = scaler.transform(X_df)
-        return nn_model.predict(X_scaled, verbose=0).flatten()
-
+    # Store results
     model_results['neural_network'] = {
         'model': nn_model,
         'scaler': scaler,
-        'val_rmse': nn_val_rmse,
-        'val_r2': nn_val_r2,
-        'val_mae': nn_val_mae,
-        'val_mse': nn_val_mse,
-        'val_mape': nn_val_mape,
-        'test_r2': nn_test_r2,
-        'test_rmse': nn_test_rmse,
-        'test_mae': nn_test_mae,
-        'test_mse': nn_test_mse,
-        'test_mape': nn_test_mape,
+        'val_rmse': nn_val_metrics['rmse'],
+        'val_r2': nn_val_metrics['r2'],
+        'val_mae': nn_val_metrics['mae'],
+        'val_mse': nn_val_metrics['mse'],
+        'val_mape': nn_val_metrics['mape'],
+        'test_r2': nn_test_metrics['r2'],
+        'test_rmse': nn_test_metrics['rmse'],
+        'test_mae': nn_test_metrics['mae'],
+        'test_mse': nn_test_metrics['mse'],
+        'test_mape': nn_test_metrics['mape'],
         'history': history.history,
         'predictions': nn_test_pred,
-        'predict_fn': nn_predict_fn
+        'predict_fn': create_wrapper_predict_fn(nn_model, scaler)
     }
 
-    # Create and log NN visualizations to the visualizations directory
+    # Create and log NN visualizations
     nn_pred_vs_actual_path = os.path.join(visualizations_dir, 'nn_predicted_vs_actual.png')
     create_predicted_vs_actual_plot(y_test, nn_test_pred, 'Neural Network',
                                     model_results['neural_network'], nn_pred_vs_actual_path)
@@ -685,39 +642,27 @@ def model_training(data_splits, target_column='price'):
     plt.close()
 
     # Log visualizations
-    mlflow.log_artifact(nn_pred_vs_actual_path, "visualizations")
-    mlflow.log_artifact(nn_history_path, "visualizations")
+    log_visualizations([nn_pred_vs_actual_path, nn_history_path])
 
     # ----------------------------------------------------
     # Model Comparison and Selection
     # ----------------------------------------------------
 
-    # Define all models for comparison and logging
+    # Define all models for comparison
     all_models = ['decision_tree', 'random_forest', 'xgboost_gpu', 'neural_network']
 
-    # Find best model based on cross-validation and validation scores
-    tree_models = ['decision_tree', 'random_forest', 'xgboost_gpu']
-    best_tree_model = max(tree_models, key=lambda x: model_results[x].get('test_r2', 0))
-
-    # Compare best tree model with neural network using validation R² (like original)
-    if model_results[best_tree_model]['test_r2'] > model_results['neural_network']['test_r2']:
-        best_model_name = best_tree_model
-    else:
-        best_model_name = 'neural_network'
-
+    # Find best model based on test R²
+    best_model_name = max(all_models, key=lambda x: model_results[x]['test_r2'])
     print(f"\nBest model: {best_model_name}")
 
-    # Create a summary DataFrame for model comparison
-    summary_data = []
-    for model_name in all_models:
-        model_data = model_results[model_name]
-        summary_data.append({
-            'Model': model_name,
-            'Test R²': model_data.get('test_r2', 0),
-            'Test RMSE': model_data.get('test_rmse', 0),
-            'Test MAE': model_data.get('test_mae', 0),
-            'Test MAPE (%)': model_data.get('test_mape', 0)
-        })
+    # Create summary DataFrame
+    summary_data = [{
+        'Model': model_name,
+        'Test R²': model_results[model_name]['test_r2'],
+        'Test RMSE': model_results[model_name]['test_rmse'],
+        'Test MAE': model_results[model_name]['test_mae'],
+        'Test MAPE (%)': model_results[model_name]['test_mape']
+    } for model_name in all_models]
 
     summary_df = pd.DataFrame(summary_data).sort_values('Test R²', ascending=False)
     print("\nModel Performance Comparison:")
@@ -728,7 +673,7 @@ def model_training(data_splits, target_column='price'):
         print(f"\nTop 10 Important Features ({best_model_name}):")
         print(model_results[best_model_name]['feature_importance'].head(10))
 
-    # Create summary model comparison visualization
+    # Create summary visualization
     plt.figure(figsize=(12, 6))
     models = summary_df['Model']
     r2_values = summary_df['Test R²']
@@ -754,7 +699,7 @@ def model_training(data_splits, target_column='price'):
     summary_df.to_csv(summary_csv_path, index=False)
     mlflow.log_artifact(summary_csv_path, "artifacts")
 
-    # Log best model name parameter
+    # Log best model name and GPU parameters
     mlflow.log_param("best_model", best_model_name)
     mlflow.log_param("gpu_acceleration", "True")
     mlflow.set_tag("gpu_model", "NVIDIA RTX 3060 Ti")
