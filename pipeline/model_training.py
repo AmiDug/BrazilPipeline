@@ -1,15 +1,13 @@
-import os
-import tempfile
-
 # Set environment variables before any other imports
+import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TensorFlow warnings
 os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # Use first GPU (3060 Ti)
 os.environ['XGBOOST_MODEL_FORMAT'] = 'json'  # Force JSON format for XGBoost model saving
 
 # Set matplotlib to use a non-GUI backend BEFORE any other imports
 import matplotlib
-
 matplotlib.use('Agg')  # Force non-interactive backend
+import tempfile
 import matplotlib.pyplot as plt
 import pandas as pd
 import numpy as np
@@ -26,18 +24,7 @@ from sklearn.model_selection import KFold, cross_val_score
 import mlflow
 
 def create_plot(plot_function, args, kwargs, save_path=None):
-    """
-    Generic plotting function to reduce code duplication
-
-    Parameters:
-    plot_function (callable): Function that creates the actual plot
-    args (tuple): Positional arguments for plot_function
-    kwargs (dict): Keyword arguments for plot_function
-    save_path (str, optional): Path to save the figure
-
-    Returns:
-    str or None: Path to saved figure or None if displayed
-    """
+    """Generic plotting function to reduce code duplication"""
     # Create plot using provided function
     plot_function(*args, **kwargs)
 
@@ -55,7 +42,6 @@ def create_plot(plot_function, args, kwargs, save_path=None):
 
 def create_error_by_price_range_plot(y_test, y_pred, save_path=None):
     """Create a bar chart showing prediction error by price range."""
-
     def plot_function(y_test, y_pred):
         # Convert to numpy arrays if they're not already
         y_test = np.array(y_test)
@@ -106,7 +92,6 @@ def create_error_by_price_range_plot(y_test, y_pred, save_path=None):
 
 def create_feature_importance_plot(feature_importance_df, save_path=None):
     """Create a horizontal bar chart of feature importances."""
-
     def plot_function(df):
         # Sort by importance and take top 15
         df = df.sort_values('importance', ascending=False).head(15)
@@ -122,7 +107,6 @@ def create_feature_importance_plot(feature_importance_df, save_path=None):
 
 def create_predicted_vs_actual_plot(y_test, y_pred, model_name, metrics, save_path=None):
     """Create a scatter plot of predicted vs actual values."""
-
     def plot_function(y_test, y_pred, model_name, metrics):
         plt.figure(figsize=(10, 8))
         plt.scatter(y_test, y_pred, alpha=0.5, s=5)
@@ -146,7 +130,6 @@ def create_predicted_vs_actual_plot(y_test, y_pred, model_name, metrics, save_pa
 
 def create_customer_states_plot(df, save_path=None):
     """Create a bar chart of top 10 customer states."""
-
     def plot_function(df):
         # Count states
         state_counts = df['customer_state'].value_counts().head(10)
@@ -170,16 +153,7 @@ def create_customer_states_plot(df, save_path=None):
 
 
 def evaluate_model(y_true, y_pred):
-    """
-    Calculate common regression metrics for model evaluation
-
-    Parameters:
-    y_true (array-like): True target values
-    y_pred (array-like): Predicted target values
-
-    Returns:
-    dict: Dictionary containing evaluation metrics
-    """
+    """Calculate common regression metrics for model evaluation"""
     metrics = {
         'r2': r2_score(y_true, y_pred),
         'mse': mean_squared_error(y_true, y_pred),
@@ -199,7 +173,6 @@ def log_visualizations(paths, artifact_dir="visualizations"):
 
 def create_wrapper_predict_fn(model, scaler=None, is_xgboost=False):
     """Create a standardized prediction function"""
-
     def predict_fn(X_df):
         if is_xgboost:
             if not isinstance(X_df, xgb.DMatrix):
@@ -210,7 +183,6 @@ def create_wrapper_predict_fn(model, scaler=None, is_xgboost=False):
             return model.predict(X_scaled, verbose=0).flatten()
         else:
             return model.predict(X_df)
-
     return predict_fn
 
 
@@ -218,13 +190,6 @@ def model_training(data_splits, target_column='price'):
     """
     Train multiple models on the prepared data with comprehensive metrics reporting.
     GPU acceleration used for XGBoost and Neural Network models.
-
-    Models included:
-    - Standard Decision Tree (CPU)
-    - Standard Random Forest (CPU)
-    - XGBoost with GPU acceleration
-    - Neural Network with GPU acceleration
-
     All models report R², RMSE, MAE, MSE, and MAPE metrics.
     """
     print("Starting model training with GPU acceleration for XGBoost and Neural Network...")
