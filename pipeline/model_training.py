@@ -666,7 +666,6 @@ def model_training(data_splits, target_column='price'):
     # Log best model name and GPU parameters
     mlflow.log_param("best_model", best_model_name)
     mlflow.log_param("gpu_acceleration", "True")
-    mlflow.set_tag("gpu_model", "NVIDIA RTX 3060 Ti")
 
     return {
         "models": model_results,
