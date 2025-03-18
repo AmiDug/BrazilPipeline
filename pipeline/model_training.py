@@ -1,7 +1,7 @@
 # Set environment variables before any other imports
 import os
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '2'  # Suppress TensorFlow warnings
-os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # Use first GPU (3060 Ti)
+os.environ['CUDA_VISIBLE_DEVICES'] = '0'  # Use first GPU
 os.environ['XGBOOST_MODEL_FORMAT'] = 'json'  # Force JSON format for XGBoost model saving
 
 # Set matplotlib to use a non-GUI backend BEFORE any other imports

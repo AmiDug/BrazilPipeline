@@ -5,7 +5,7 @@ from sklearn.preprocessing import LabelEncoder
 import mlflow
 
 def data_transformation(df, test_size=0.3, random_state=19):
-    """Transform data using notebook's approach for higher accuracy"""
+    """Transform data for higher accuracy"""
     print("Starting data transformation...")
     df_clean = df.copy()
 
@@ -42,11 +42,11 @@ def data_transformation(df, test_size=0.3, random_state=19):
         df_clean = df_clean[(df_clean['price'] >= q_low) & (df_clean['price'] <= q_high)]
         print(f"Removed {rows_before - len(df_clean)} price outliers")
 
-    # 3. Create basic volume feature (same as notebook)
+    # 3. Create basic volume feature
     if all(col in df_clean.columns for col in ['product_length_cm', 'product_height_cm', 'product_width_cm']):
         df_clean['volume_cm3'] = df_clean['product_length_cm'] * df_clean['product_height_cm'] * df_clean['product_width_cm']
 
-    # 4. Label Encoding for categorical variables (like the notebook)
+    # 4. Label Encoding for categorical variables
     print("Applying Label Encoding to categorical variables...")
     le = LabelEncoder()
     for col in cat_cols:
@@ -63,7 +63,7 @@ def data_transformation(df, test_size=0.3, random_state=19):
     # 6. Remove any infinity/NaN values
     df_clean = df_clean.replace([np.inf, -np.inf], np.nan).fillna(0)
 
-    # 7. Select numeric and boolean columns for modeling (similar to notebook)
+    # 7. Select numeric and boolean columns for modeling
     feature_cols = [col for col in df_clean.columns
                    if col != 'price' and (pd.api.types.is_numeric_dtype(df_clean[col]) or
                                          pd.api.types.is_bool_dtype(df_clean[col]))]
