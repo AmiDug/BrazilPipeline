@@ -68,8 +68,39 @@ Decision Tree:
 
 ![image](https://github.com/user-attachments/assets/de7a24c1-d32c-4a7e-a8e6-18c9dbc15768)
 
+![image](https://github.com/user-attachments/assets/fe2c6eee-3fb7-4cf6-b6bb-66badb26db8f)
+
+Random Forest:
+
+![image](https://github.com/user-attachments/assets/78c0a1b1-16d3-4b59-89a6-5f1f1e6a89c5)
+
+![image](https://github.com/user-attachments/assets/6c6fcdb6-f6db-456a-98cb-53075e5dd418)
+
+Neural Network:
+
+![image](https://github.com/user-attachments/assets/cfcaff43-ec58-4ded-865b-0478fee47637)
+
+![image](https://github.com/user-attachments/assets/98bb06d4-c505-4463-91b1-825882b4baaa)
+
+XGBoost:
+
+![image](https://github.com/user-attachments/assets/9a480d9c-89f8-4117-8fd6-49f0705b3cb2)
+
+![image](https://github.com/user-attachments/assets/1d4e734a-2e78-4d13-94ec-80b551d758a3)
+
+![image](https://github.com/user-attachments/assets/06b9058c-7fcf-4e02-aa1b-5480c974c342)
 
 XGBoost had the best accuracy at 76.8%. This model acquired a result of 58% before tuning because it would take too long to train it properly on a CPU, so computation was switched to a GPU and amount of rounds were increased which gave a better accuracy.
 XGBoost's inbuilt cross-validation was also used in order to get several samplings of the data to make sure that the accuracy would be fairly consistent across different parts of the dataset.
+
+The results imply decision tree is too simple of a model for such a vast dataset with intricately linked and complex features. Ensemble approaches such as gradient boosting and random forest works better for this type of data because they can split up the 
+training workload, for example certain trees can specialize into predicting certain features and the average of this analysis can yield a better result than simply doing hard binary split in each node like decision trees do. Neural networks also did decently
+since there were a lot of non-linear patterns that could be recognized however neural networks struggle with tabular data and prefer unstructured datasets.
+
+Other metrics such as RMSE, MAE and MAPE were roughly in line with the accuracy so there doesn't seem to be anything unusual about them.
+
+In conclusion I believe that the biggest takeaway from this report is that it sometimes results are limited by hardware rather than something being wrong with the model and that you need to give very complex and large datasets enough computational
+power such as with a GPU to make the training meaningful. I believe I could have tried to improve and tune the random forest model more and it is possible it could do as well as the gradient boosting method however I mostly focused on gradient boosting since it gave
+me the best results when I was solely using my local PC's CPU computation. I also learned that deep learning models don't work as well as I thought they would on tabulated data but prefer unstructured data which is something I will consider when choosing models in the future.
 
 [1]Olist. (n.d.). Brazilian E-Commerce Public Dataset by Olist [Data set]. Kaggle. https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
