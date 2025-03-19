@@ -26,15 +26,41 @@ claims of price gouging for the retailer which affects reputation and may even l
 
 According to our pipeline the merged datasets consist of 112650 rows with 52 columns, the disk size is 126.19 MB. 19 of the features were numerical while the rest were categorical.
 
+The data was cleaned through various means. 8427 price outliers were identified and and 211 in the 99.9th percentile were removed, 
+extreme outliers can overly bias the data despite making up a small amount of the total amount of entries.
+
+The price distribution following this step can be seen in this image:
+
+![price_distribution](https://raw.githubusercontent.com/AmiDug/BrazilPipeline/refs/heads/master/documents/price_distribution.png)
+
+There were also 10225 product-order combinations that were duplicates and were therefore removed, duplicate data allows a single data entry have several times the training impact that it should have.
+
+Categorical features such as product_category_name_english, customer_state, seller_state and payment_type had missing values that were imputed with "unknown" values rather than dropping the entire feature,
+this preserves the data volume while not letting missing value affect the results.
+
+Categorical features were also converted to numerical represented ones that are more appropriate for mathematical machine models through label encoding.
+
+Most features were determined to be non-predictive and were either merged with other features to create something with predictive power or in most cases simply dropped, 
+out of 52 columns the training only happened with 16 features, engineered or otherwise.
+
+An Exploratory Data Analysis or EDA was performed and there were some interesting findings.
+
+Firstly there was significant variation in pricing that was based on products categories, in particular electronics and furniture commanded higher prices than other categories.
+
+![category_distribution](https://raw.githubusercontent.com/AmiDug/BrazilPipeline/refs/heads/master/documents/category_distribution.png)
+
+Geographic analysis revealed that certain regions such as São Paulo and Rio de Janeiro were more represented than others.
+
+![state_distribution](https://raw.githubusercontent.com/AmiDug/BrazilPipeline/refs/heads/master/documents/state_distribution.png)
+
+Feature importance analysis showed that there are significant relationships between price and the volume and weight of the cargo.
+
+![feature_importance](https://raw.githubusercontent.com/AmiDug/BrazilPipeline/refs/heads/master/documents/xgb_feature_importance.png)
+
 
 
 [1]Olist. (n.d.). Brazilian E-Commerce Public Dataset by Olist [Data set]. Kaggle. https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
 
-![category_distribution](https://github.com/user-attachments/assets/254cbd16-6eed-471c-b409-8bb15f698772)
 ![error_by_price](https://github.com/user-attachments/assets/981d6508-a0b8-4dbf-98ec-3764e2e76878)
 ![error_distribution](https://github.com/user-attachments/assets/f434442f-b4bb-41a5-8f0a-35781ed7c977)
-![feature_importance](https://github.com/user-attachments/assets/ba90f1b3-ac48-4845-b519-297370fe09d3)
-![freight_vs_price](https://github.com/user-attachments/assets/84f0e34e-7d08-4696-8e9e-c55b786ef0a6)
 ![pred_vs_actual](https://github.com/user-attachments/assets/21c0223c-e511-40f0-b250-7258aba472a5)
-![price_distribution](https://github.com/user-attachments/assets/de55678a-5b93-4ea5-9eae-7160d5d5f57a)
-![state_distribution](https://github.com/user-attachments/assets/6e2908ae-fb0d-4fd8-922d-3679b678e66f)
