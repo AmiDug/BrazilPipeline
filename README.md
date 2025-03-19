@@ -111,4 +111,4 @@ me the best results when I was solely using my local PC's CPU computation. I als
 
 [1]Olist. (n.d.). Brazilian E-Commerce Public Dataset by Olist [Data set]. Kaggle. https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
 
-Claude 3.7 helped in answering some questions I had and with troubleshooting
+Claude 3.7 helped in answering some questions I had, commenting the code and with troubleshooting
