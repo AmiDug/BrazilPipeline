@@ -57,7 +57,13 @@ Feature importance analysis showed that there are significant relationships betw
 
 ![feature_importance](https://raw.githubusercontent.com/AmiDug/BrazilPipeline/refs/heads/master/documents/xgb_feature_importance.png)
 
+Feature engineering was employed to merge features together to create better correlations. An example is the creation of a volume feature that combined the length, height and width of a product. The volume feature turned out to be highly correlated to price.
 
+Four models were employed, a decision tree, random forest, XGBoost and a neutral network.
+
+![model summary](https://raw.githubusercontent.com/AmiDug/BrazilPipeline/refs/heads/master/documents/model_summary.png)
+
+XGBoost had the best accuracy at 76.8%. This model acquired a result of 58% before tuning because it couldn't be trained for long enough on a CPU, so computation was switched to a GPU
 
 [1]Olist. (n.d.). Brazilian E-Commerce Public Dataset by Olist [Data set]. Kaggle. https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
 
