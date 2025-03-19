@@ -373,33 +373,33 @@ def model_training(data_splits, target_column='price'):
     dtrain = xgb.DMatrix(X_train, label=y_train)
     dtest = xgb.DMatrix(X_test, label=y_test)
 
-    # XGBoost parameters with updated syntax for newer XGBoost versions (2.0+)
+    # XGBoost parameters
     params = {
         'objective': 'reg:squarederror',
         'eval_metric': 'rmse',
-        'tree_method': 'hist',  # Updated from 'gpu_hist'
-        'device': 'cuda',  # Use CUDA instead of 'gpu_id'
-        'max_depth': 12,  # Increased from 11
-        'learning_rate': 0.05,  # Reduced to allow more boosting rounds
-        'min_child_weight': 4,  # Adjusted from 5
-        'subsample': 0.85,  # For better generalization
-        'colsample_bytree': 0.85,  # For better generalization
-        'colsample_bylevel': 0.9,  # Additional regularization
-        'lambda': 1.0,  # L2 regularization
-        'alpha': 0.5,  # L1 regularization
-        'max_bin': 256,  # Increased histogram bins
-        'seed': 42  # Set seed for reproducibility
+        'tree_method': 'hist',
+        'device': 'cuda',
+        'max_depth': 12,
+        'learning_rate': 0.05,
+        'min_child_weight': 4,
+        'subsample': 0.85,
+        'colsample_bytree': 0.85,
+        'colsample_bylevel': 0.9,
+        'lambda': 1.0,
+        'alpha': 0.5,
+        'max_bin': 256,
+        'seed': 42
     }
 
     # XGBoost built-in cross-validation
     cv_results = xgb.cv(
         params,
         dtrain,
-        num_boost_round=500,  # Increased from 200
+        num_boost_round=500,
         nfold=5,
         stratified=False,
         metrics={'rmse'},
-        early_stopping_rounds=25,  # Increased from 20
+        early_stopping_rounds=25,
         seed=42,
         as_pandas=True
     )
@@ -432,7 +432,7 @@ def model_training(data_splits, target_column='price'):
         'importance': list(importance_scores.values())
     }).sort_values('importance', ascending=False)
 
-    # Calculate CV R² (not directly provided by xgb.cv)
+    # Calculate CV R²
     xgb_cv_r2 = 1 - (xgb_cv_rmse ** 2 / np.var(y_train))
 
     # Store results
