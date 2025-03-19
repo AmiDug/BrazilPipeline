@@ -8,7 +8,7 @@ Open a local mlflow tracking server from (.venv): MLflow server --backend-store-
 
 Serve a consumable FastAPI from (.venv): uvicorn api.main:app --host 0.0.0.0 --port 8000
 
-You can run the pipeline from the API using curl commands or by visiting http://localhost:8000/
+You can run the pipeline from the API using curl commands or by visiting http://localhost:8000/docs
 
 Report:
 
