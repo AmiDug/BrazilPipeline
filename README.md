@@ -12,7 +12,19 @@ You can run the pipeline from the API using curl commands or by visiting http://
 
 Report:
 
-The pipeline will use both supervised and deep learning models to train different models so that we can compare their performance on the dataset. 
+The pipeline will use both supervised and deep learning models to train different models so that we can compare their performance on the dataset.
+
+The components of the pipeline are a data ingestion step that retrieves the datasets from the Kaggle API, merges them and then creates a Pandas dataframe.
+
+The dataframe gets passed to data validation which ensures valid data types, values and outliers. If the data passes these checks then MLflow visualization charts are created.
+
+Data transformation converts categorical values to numerical ones, imputes unknown values, removes price outliers, and does feature engineering.
+
+Following transformation the data is split into training (78,707 samples) and testing (33,732 samples) sets using a 70/30 ratio with controlled randomization to ensure reproducibility.
+
+Model training creates 4 different models. A decision tree with a depth of 12. A random forest with a depth of 15 and 200 trees, a Keras neural network with batch normalization, dropout regularization, early stopping and learning rate scheduling to prevent overfitting. Finally there is an XGBoost model that is GPU-accelerated with a depth of 12, 500 boosting rounds and built-in cross-validation.
+
+Finally model evaluation calculate each model's performance with metrics such as R^2, RMSE, MAE and MAPE, it also logs and create artifacts in MLflow.
 
 The datasets consists of around 100k transactions made between the years 2016 and 2018 och the Brazillian E-commerce website Olist[1].
 
