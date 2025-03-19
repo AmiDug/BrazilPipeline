@@ -110,3 +110,5 @@ power such as with a GPU to make the training meaningful. I believe I could have
 me the best results when I was solely using my local PC's CPU computation. I also learned that deep learning models don't work as well as I thought they would on tabulated data but prefer unstructured data which is something I will consider when choosing models in the future.
 
 [1]Olist. (n.d.). Brazilian E-Commerce Public Dataset by Olist [Data set]. Kaggle. https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
+
+Claude 3.7 helped in answering some questions I had and with troubleshooting
