@@ -100,7 +100,7 @@ XGBoost had the best accuracy at 76.8%. This model acquired a result of 58% befo
 XGBoost's inbuilt cross-validation was also used in order to get several samplings of the data to make sure that the accuracy would be fairly consistent across different parts of the dataset.
 
 The results imply decision tree is too simple of a model for such a vast dataset with intricately linked and complex features. Ensemble approaches such as gradient boosting and random forest works better for this type of data because they can split up the 
-training workload, for example certain trees can specialize into predicting certain features and the average of this analysis can yield a better result than simply doing hard binary split in each node like decision trees do. Neural networks also did decently
+training workload into multiple trees, the average of these trees can lead to an analysis that will yield a better result than simply doing hard binary split in each node like decision trees do since this reduces variance and overfitting. Neural networks also did decently
 since there were a lot of non-linear patterns that could be recognized however neural networks struggle with tabular data and prefer unstructured datasets.
 
 Other metrics such as RMSE, MAE and MAPE were roughly in line with the accuracy so there doesn't seem to be anything unusual about them.
