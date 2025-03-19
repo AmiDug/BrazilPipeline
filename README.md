@@ -66,29 +66,23 @@ Four models were employed, a decision tree, random forest, XGBoost and a neutral
 
 Decision Tree:
 
-![image](https://github.com/user-attachments/assets/de7a24c1-d32c-4a7e-a8e6-18c9dbc15768)
-
-![image](https://github.com/user-attachments/assets/fe2c6eee-3fb7-4cf6-b6bb-66badb26db8f)
+![predicted vs actual](https://github.com/user-attachments/assets/fe2c6eee-3fb7-4cf6-b6bb-66badb26db8f)
 
 Random Forest:
 
-![image](https://github.com/user-attachments/assets/78c0a1b1-16d3-4b59-89a6-5f1f1e6a89c5)
-
-![image](https://github.com/user-attachments/assets/6c6fcdb6-f6db-456a-98cb-53075e5dd418)
+![predicted vs actual](https://github.com/user-attachments/assets/6c6fcdb6-f6db-456a-98cb-53075e5dd418)
 
 Neural Network:
 
-![image](https://github.com/user-attachments/assets/cfcaff43-ec58-4ded-865b-0478fee47637)
+![predicted vs actual](https://github.com/user-attachments/assets/cfcaff43-ec58-4ded-865b-0478fee47637)
 
-![image](https://github.com/user-attachments/assets/98bb06d4-c505-4463-91b1-825882b4baaa)
+![training history](https://github.com/user-attachments/assets/98bb06d4-c505-4463-91b1-825882b4baaa)
 
 XGBoost:
 
-![image](https://github.com/user-attachments/assets/9a480d9c-89f8-4117-8fd6-49f0705b3cb2)
+![error by price range](https://github.com/user-attachments/assets/9a480d9c-89f8-4117-8fd6-49f0705b3cb2)
 
-![image](https://github.com/user-attachments/assets/1d4e734a-2e78-4d13-94ec-80b551d758a3)
-
-![image](https://github.com/user-attachments/assets/06b9058c-7fcf-4e02-aa1b-5480c974c342)
+![predicted vs actual](https://github.com/user-attachments/assets/06b9058c-7fcf-4e02-aa1b-5480c974c342)
 
 XGBoost had the best accuracy at 76.8%. This model acquired a result of 58% before tuning because it would take too long to train it properly on a CPU, so computation was switched to a GPU and amount of rounds were increased which gave a better accuracy.
 XGBoost's inbuilt cross-validation was also used in order to get several samplings of the data to make sure that the accuracy would be fairly consistent across different parts of the dataset.
