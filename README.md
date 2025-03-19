@@ -26,7 +26,7 @@ Model training creates 4 different models. A decision tree with a depth of 12. A
 
 Finally model evaluation calculate each model's performance with metrics such as R^2, RMSE, MAE and MAPE, it also logs and create artifacts in MLflow.
 
-The datasets consists of around 100k transactions made between the years 2016 and 2018 och the Brazillian E-commerce website Olist[1].
+The datasets consists of around 100k transactions made between the years 2016 and 2018 from the Brazillian E-commerce website Olist[1].
 
 There are many 9 different datasets including for customers, geolocation, order items, order payments, order reviews, orders, products, sellers and product categories.
 
