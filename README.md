@@ -24,9 +24,9 @@ Following transformation the data is split into training (78,707 samples) and te
 
 Model training creates 4 different models. A decision tree with a depth of 12. A random forest with a depth of 15 and 200 trees, a Keras neural network with batch normalization, dropout regularization, early stopping and learning rate scheduling to prevent overfitting. Finally there is an XGBoost model that is GPU-accelerated with a depth of 12, 500 boosting rounds and built-in cross-validation.
 
-Finally model evaluation calculate each model's performance with metrics such as R^2, RMSE, MAE and MAPE, it also logs and create artifacts in MLflow.
+Finally, model evaluation calculates each model's performance with metrics such as R^2, RMSE, MAE and MAPE, it also logs and creates artifacts in MLflow.
 
-The datasets consists of around 100k transactions made between the years 2016 and 2018 from the Brazillian E-commerce website Olist[1].
+The datasets consists of around 100k transactions made between the years 2016 and 2018 from the Brazilian E-commerce website Olist[1].
 
 There are many 9 different datasets including for customers, geolocation, order items, order payments, order reviews, orders, products, sellers and product categories.
 
@@ -39,13 +39,13 @@ claims of price gouging for the retailer which affects reputation and may even l
 According to our pipeline the merged datasets consist of 112650 rows with 52 columns, the disk size is 126.19 MB. 19 of the features were numerical while the rest were categorical.
 
 The data was cleaned through various means. 8427 price outliers were identified and and 211 in the 99.9th percentile were removed, 
-extreme outliers can overly bias the data despite making up a small amount of the total amount of entries.
+extreme outliers can overly bias the data despite making up a small amount of the total number of entries.
 
 The price distribution following this step can be seen in this image:
 
 ![price_distribution](https://raw.githubusercontent.com/AmiDug/BrazilPipeline/refs/heads/master/documents/price_distribution.png)
 
-There were also 10225 product-order combinations that were duplicates and were therefore removed, duplicate data allows a single data entry have several times the training impact that it should have.
+There were also 10225 product-order combinations that were duplicates and were therefore removed, duplicate data allows a single data entry to have several times the training impact that it should have.
 
 Categorical features such as product_category_name_english, customer_state, seller_state and payment_type had missing values that were imputed with "unknown" values rather than dropping the entire feature,
 this preserves the data volume while not letting missing value affect the results.
@@ -57,7 +57,7 @@ out of 52 columns the training only happened with 16 features, engineered or oth
 
 An Exploratory Data Analysis or EDA was performed and there were some interesting findings.
 
-Firstly there was significant variation in pricing that was based on products categories, in particular electronics and furniture commanded higher prices than other categories.
+Firstly there was significant variation in pricing that was based on product categories, in particular electronics and furniture commanded higher prices than other categories.
 
 ![category_distribution](https://raw.githubusercontent.com/AmiDug/BrazilPipeline/refs/heads/master/documents/category_distribution.png)
 
@@ -70,7 +70,7 @@ Feature importance analysis showed that there are significant relationships betw
 ![feature_importance](https://raw.githubusercontent.com/AmiDug/BrazilPipeline/refs/heads/master/documents/xgb_feature_importance.png)
 
 Feature engineering was employed to merge features together to create better correlations. An example is the creation of a volume feature that combined the length, height and width of a product. The volume feature turned out to be highly correlated to price.
-There were also some features that were clear example of data leaks such as payment amount which will obviously be very highly correlated with the product price, the difference only consisting of shipment costs, these were removed.
+There were also some features that were clear examples of data leaks such as payment amount which will obviously be very highly correlated with the product price, the difference only consisting of shipment costs, these were removed.
 
 Four models were employed, a decision tree, random forest, XGBoost and a neutral network.
 
@@ -100,12 +100,11 @@ XGBoost had the best accuracy at 76.8%. This model acquired a result of 58% befo
 XGBoost's inbuilt cross-validation was also used in order to get several samplings of the data to make sure that the accuracy would be fairly consistent across different parts of the dataset.
 
 The results imply decision tree is too simple of a model for such a vast dataset with intricately linked and complex features. Ensemble approaches such as gradient boosting and random forest works better for this type of data because they can split up the 
-training workload into multiple trees, the average of these trees can lead to an analysis that will yield a better result than simply doing hard binary split in each node like decision trees do since this reduces variance and overfitting. Neural networks also did decently
-since there were a lot of non-linear patterns that could be recognized however neural networks struggle with tabular data and prefer unstructured datasets.
+training workload into multiple trees, the average of these trees can lead to an analysis that will yield a better result than simply doing hard binary split in each node like decision trees do since this reduces variance and overfitting. Neural networks also did decently since there were a lot of non-linear patterns that could be recognized, however neural networks struggle with tabular data and prefer unstructured datasets.
 
 Other metrics such as RMSE, MAE and MAPE were roughly in line with the accuracy so there doesn't seem to be anything unusual about them.
 
-In conclusion I believe that the biggest takeaway from this report is that it sometimes results are limited by hardware rather than something being wrong with the model and that you need to give very complex and large datasets enough computational
+In conclusion I believe that the biggest takeaway from this report is that sometimes results are limited by hardware rather than something being wrong with the model and that you need to give very complex and large datasets enough computational
 power such as with a GPU to make the training meaningful. I believe I could have tried to improve and tune the random forest model more and it is possible it could do as well as the gradient boosting method however I mostly focused on gradient boosting since it gave
 me the best results when I was solely using my local PC's CPU computation. I also learned that deep learning models don't work as well as I thought they would on tabulated data but prefer unstructured data which is something I will consider when choosing models in the future.
 
