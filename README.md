@@ -58,15 +58,18 @@ Feature importance analysis showed that there are significant relationships betw
 ![feature_importance](https://raw.githubusercontent.com/AmiDug/BrazilPipeline/refs/heads/master/documents/xgb_feature_importance.png)
 
 Feature engineering was employed to merge features together to create better correlations. An example is the creation of a volume feature that combined the length, height and width of a product. The volume feature turned out to be highly correlated to price.
+There were also some features that were clear example of data leaks such as payment amount which will obviously be very highly correlated with the product price, the difference only consisting of shipment costs, these were removed.
 
 Four models were employed, a decision tree, random forest, XGBoost and a neutral network.
 
 ![model summary](https://raw.githubusercontent.com/AmiDug/BrazilPipeline/refs/heads/master/documents/model_summary.png)
 
-XGBoost had the best accuracy at 76.8%. This model acquired a result of 58% before tuning because it couldn't be trained for long enough on a CPU, so computation was switched to a GPU
+Decision Tree:
+
+![image](https://github.com/user-attachments/assets/de7a24c1-d32c-4a7e-a8e6-18c9dbc15768)
+
+
+XGBoost had the best accuracy at 76.8%. This model acquired a result of 58% before tuning because it would take too long to train it properly on a CPU, so computation was switched to a GPU and amount of rounds were increased which gave a better accuracy.
+XGBoost's inbuilt cross-validation was also used in order to get several samplings of the data to make sure that the accuracy would be fairly consistent across different parts of the dataset.
 
 [1]Olist. (n.d.). Brazilian E-Commerce Public Dataset by Olist [Data set]. Kaggle. https://www.kaggle.com/datasets/olistbr/brazilian-ecommerce
-
-![error_by_price](https://github.com/user-attachments/assets/981d6508-a0b8-4dbf-98ec-3764e2e76878)
-![error_distribution](https://github.com/user-attachments/assets/f434442f-b4bb-41a5-8f0a-35781ed7c977)
-![pred_vs_actual](https://github.com/user-attachments/assets/21c0223c-e511-40f0-b250-7258aba472a5)
