@@ -6,7 +6,7 @@ Uses SciKit-Learn, Tensorflow, Keras and XGBoost models.
 
 Open a local mlflow tracking server from (.venv): MLflow server --backend-store-uri sqlite:///instance/mlflow.db --default-artifact-root ./mlflow-artifacts --host 127.0.0.1 --port 8080
 
-Serve a consumable FastAPI from (.venv): uvicorn api.main:app --host 0.0.0.0 --port 8000
+Serve a consumable FastAPI endpoint from (.venv): uvicorn api.main:app --host 0.0.0.0 --port 8000
 
 You can run the pipeline from the API using curl commands or by visiting http://localhost:8000/docs
 
